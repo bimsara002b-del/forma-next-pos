@@ -1,0 +1,68 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Product {
+  id            String          @id @default(cuid())
+  sku           String          @unique
+  barcode       String?         @unique
+  name          String
+  category      String
+  priceCents    Int
+  costCents     Int
+  stockQty      Int             @default(0)
+  minStockQty   Int             @default(5)
+  isActive      Boolean         @default(true)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  saleItems     SaleItem[]
+  stockMovements StockMovement[]
+
+  @@index([category])
+  @@index([name])
+}
+
+model Sale {
+  id                  String     @id @default(cuid())
+  receiptNumber       String     @unique
+  subTotalCents       Int
+  totalCents          Int
+  paymentMethod       String
+  amountReceivedCents Int
+  changeCents         Int
+  createdAt           DateTime   @default(now())
+  items               SaleItem[]
+
+  @@index([createdAt])
+}
+
+model SaleItem {
+  id             String   @id @default(cuid())
+  saleId         String
+  productId      String
+  productName    String
+  quantity       Int
+  unitPriceCents Int
+  lineTotalCents Int
+  sale           Sale     @relation(fields: [saleId], references: [id])
+  product        Product  @relation(fields: [productId], references: [id])
+
+  @@index([saleId])
+}
+
+model StockMovement {
+  id          String   @id @default(cuid())
+  productId   String
+  changeQty   Int
+  reason      String
+  reference   String?
+  createdAt   DateTime @default(now())
+  product     Product  @relation(fields: [productId], references: [id])
+
+  @@index([productId, createdAt])
+}
