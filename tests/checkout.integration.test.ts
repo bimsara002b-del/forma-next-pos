@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
-import { CheckoutFailure, commitCashCheckout } from "../src/lib/checkout";
+import { commitCashCheckout } from "../src/lib/checkout";
 
 // This file NEVER defaults to DATABASE_URL or a developer's live/demo database.
 // In CI, prepare a separate local SQLite test file before setting this env.
@@ -9,7 +9,7 @@ const url = process.env.POS_TEST_DATABASE_URL;
 const isSafeTestDatabase = /^file:\.\/[a-zA-Z0-9_-]*integration\.test\.db$/.test(url ?? "");
 const test = isSafeTestDatabase ? it : it.skip;
 const db = isSafeTestDatabase
-  ? new PrismaClient({ datasources: { db: { url } } })
+  ? new PrismaClient({ datasources: { db: { url: url! } } })
   : null;
 
 function freshSale(productId: string, requestId = randomUUID(), quantity = 1, receivedCents = 2000) {

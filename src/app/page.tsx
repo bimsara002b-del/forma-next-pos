@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
-import { isAuthenticated } from "@/lib/auth";
+import { getActor } from "@/lib/auth";
 import { PosWorkspace } from "@/components/pos-workspace";
 export default async function Page() {
-  if (!await isAuthenticated()) redirect("/login");
+  if (!await getActor()) redirect("/login");
   return <PosWorkspace />;
 }

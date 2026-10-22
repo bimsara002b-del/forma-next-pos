@@ -56,3 +56,7 @@ Research and roadmap are maintained in the project Notion Blueprint (Forma Next 
 - **Integration tests:** CI prepares a disposable, separate SQLite database and runs payment, idempotency, stock ledger and concurrent last-unit tests. Unit tests run without touching local demo databases. To run the integration suite locally, initialize a separate file called \`prisma/pos-integration.test.db\` and set \`POS_TEST_DATABASE_URL=file:./pos-integration.test.db\` explicitly; do not point tests to the demo database.
 
 **Important:** This is still a development demo with a shared password, no user-level roles, no audited cash sessions, refunds or real card payments. Never use it for real customer payment processing. Field testing after Codespaces login is still required.
+
+
+## Optional staff login foundation (experimental)
+The current shared-password login remains the default. After backing up the local demo database, run npm run db:generate and npm run db:push. Run npm run staff:bootstrap to create username owner with the existing POS_ACCESS_PASSWORD. Add POS_STAFF_AUTH_ENABLED=true to your untracked .env and restart to enable staff login. Turn the flag back off to return to demo access. This experimental feature lacks login rate limiting, user management UI, password resets, MFA, multi-tenant separation and production hardening. Do not use it with real retail records.

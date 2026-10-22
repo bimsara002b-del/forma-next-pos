@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { authError, isAuthenticated, mutationAuthError } from "@/lib/auth";
+import { permissionError, mutationAuthError } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { commitCashCheckout, CheckoutFailure } from "@/lib/checkout";
 export const runtime = "nodejs";
@@ -14,7 +14,7 @@ const checkoutSchema = z.object({
 }).strict();
 
 export async function POST(request: Request) {
-  if (!await isAuthenticated()) return authError();
+  const denied=await permissionError("checkout"); if(denied)return denied;
   const originError = mutationAuthError(request);
   if (originError) return originError;
   let body: unknown;
