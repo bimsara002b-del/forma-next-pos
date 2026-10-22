@@ -1,7 +1,9 @@
 "use client";
 import { FormEvent, useState } from "react";
+import { useRouter } from "next/navigation";
 import { ArrowRight, LockKeyhole, ShoppingBasket } from "lucide-react";
 export function LoginForm() {
+  const router = useRouter();
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
@@ -14,7 +16,8 @@ export function LoginForm() {
       });
       const data: { error?: string } = await response.json();
       if (!response.ok) throw new Error(data.error ?? "Sign-in failed.");
-      window.location.assign("/");
+      router.replace("/");
+      router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Cannot connect to the POS.");
       setPending(false);

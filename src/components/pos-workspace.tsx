@@ -1,5 +1,6 @@
 "use client";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Activity, ArrowRight, Barcode, Boxes, CheckCircle2, CircleAlert, CreditCard,
   LayoutDashboard, LogOut, Minus, Package, Plus, Printer, ReceiptText, RefreshCcw,
@@ -24,13 +25,14 @@ const emptyNew: NewProduct = { sku: "", barcode: "", name: "", category: "Genera
 async function readJson<T>(response: Response): Promise<T> {
   const result = await response.json();
   if (!response.ok) {
-    if (response.status === 401) window.location.assign("/login");
+    if (response.status === 401) throw new Error("Your session expired. Sign in again.");
     throw new Error(result.error ?? "Request failed");
   }
   return result as T;
 }
 
 export function PosWorkspace() {
+  const router = useRouter();
   const [view, setView] = useState<View>("pos");
   const [products, setProducts] = useState<Product[]>([]);
   const [sales, setSales] = useState<SaleSummary[]>([]);
@@ -49,20 +51,44 @@ export function PosWorkspace() {
   const searchInput = useRef<HTMLInputElement>(null);
   const checkoutRequestId = useRef("");
 
+  const loadData = useCallback(async () => {
+    const [catalog, overview] = await Promise.all([
+      fetch("/api/products", { cache: "no-store" }).then(r => readJson<{ products: Product[] }>(r)),
+      fetch("/api/overview", { cache: "no-store" }).then(r => readJson<{ stats: Stats; sales: SaleSummary[] }>(r))
+    ]);
+    return { catalog, overview };
+  }, []);
   const refresh = useCallback(async () => {
     try {
-      const [catalog, overview] = await Promise.all([
-        fetch("/api/products", { cache: "no-store" }).then(r => readJson<{ products: Product[] }>(r)),
-        fetch("/api/overview", { cache: "no-store" }).then(r => readJson<{ stats: Stats; sales: SaleSummary[] }>(r))
-      ]);
+      const { catalog, overview } = await loadData();
       setProducts(catalog.products);
       setSales(overview.sales);
       setStats(overview.stats);
     } catch (e) {
       setNotice(e instanceof Error ? e.message : "Could not load store data.");
-    } finally { setLoading(false); }
-  }, []);
-  useEffect(() => { void refresh(); }, [refresh]);
+    } finally {
+      setLoading(false);
+    }
+  }, [loadData]);
+  useEffect(() => {
+    // Subscribe to the results of the initial asynchronous load; never synchronously
+    // update React state while the effect is being established.
+    let cancelled = false;
+    void loadData()
+      .then(({ catalog, overview }) => {
+        if (cancelled) return;
+        setProducts(catalog.products);
+        setSales(overview.sales);
+        setStats(overview.stats);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setNotice(error instanceof Error ? error.message : "Could not load store data.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [loadData]);
 
   const categories = useMemo(() => ["All", ...new Set(products.map(item => item.category))], [products]);
   const filtered = useMemo(() => products.filter(item =>
@@ -165,7 +191,7 @@ export function PosWorkspace() {
     finally { setBusyStock(""); }
   }
   async function logout() {
-    try { await fetch("/api/auth/logout", { method: "POST" }); } finally { window.location.assign("/login"); }
+    try { await fetch("/api/auth/logout", { method: "POST" }); } finally { router.replace("/login"); router.refresh(); }
   }
   const navigation: { key: View; title: string; icon: typeof ShoppingCart }[] = [
     { key: "pos", title: "Point of Sale", icon: ShoppingCart },
