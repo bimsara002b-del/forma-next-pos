@@ -1,0 +1,29 @@
+name: Next.js POS checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: "package-lock.json"
+      - run: npm ci
+      - run: npm run db:generate
+        env:
+          DATABASE_URL: "file:./ci.db"
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+        env:
+          DATABASE_URL: "file:./ci.db"
+          POS_ACCESS_PASSWORD: "ci-only-secure-password"
+          POS_SESSION_SECRET: "test-session-secret-01234567890123456789012345"

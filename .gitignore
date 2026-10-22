@@ -1,0 +1,14 @@
+node_modules
+.next
+out
+.env
+.env.local
+.env.*.local
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+prisma/migrations/.DS_Store
+*.tsbuildinfo
+coverage
+.vercel
