@@ -47,3 +47,12 @@ If you see Prisma errors, make sure you generated the client and created the dat
 - Every environment must use its own database.
 
 Research and roadmap are maintained in the project Notion Blueprint (Forma Next POS).
+
+
+## Milestone 01 — Checkout and Codespaces security (feature branch)
+
+- **Codespaces:** Same-Origin checks now compare the exact GitHub forwarded app URL derived from Codespaces environment variables rather than simply comparing the internal localhost URL. Other site Origins remain blocked. Keep the port **Private**.
+- **Cash checkout:** Repeat submissions using the same request UUID and *same cart/tender* return the original receipt. Reusing the key with a different payload gives HTTP 409; concurrent/ambiguous failures should be retried with the same unchanged request. The cashier modal locks tender/cancel on any unconfirmed error to protect against accidentally creating a different sale.
+- **Integration tests:** CI prepares a disposable, separate SQLite database and runs payment, idempotency, stock ledger and concurrent last-unit tests. Unit tests run without touching local demo databases. To run the integration suite locally, initialize a separate file called \`prisma/pos-integration.test.db\` and set \`POS_TEST_DATABASE_URL=file:./pos-integration.test.db\` explicitly; do not point tests to the demo database.
+
+**Important:** This is still a development demo with a shared password, no user-level roles, no audited cash sessions, refunds or real card payments. Never use it for real customer payment processing. Field testing after Codespaces login is still required.

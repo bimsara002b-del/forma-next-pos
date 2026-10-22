@@ -44,6 +44,7 @@ export function PosWorkspace() {
   const [modal, setModal] = useState<"checkout" | "product" | null>(null);
   const [received, setReceived] = useState("");
   const [busy, setBusy] = useState(false);
+  const [checkoutUncertain, setCheckoutUncertain] = useState(false);
   const [busyStock, setBusyStock] = useState("");
   const [notice, setNotice] = useState("");
   const [lastReceipt, setLastReceipt] = useState<Receipt | null>(null);
@@ -128,18 +129,18 @@ export function PosWorkspace() {
   };
   const openCheckout = useCallback(() => {
     if (!cart.length) return;
-    checkoutRequestId.current = crypto.randomUUID();
+    if (!checkoutRequestId.current) checkoutRequestId.current = crypto.randomUUID();
     setReceived((totalCents / 100).toFixed(2)); setModal("checkout"); setNotice("");
   }, [cart.length, totalCents]);
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if (event.key === "F2") { event.preventDefault(); setView("pos"); setTimeout(() => searchInput.current?.focus(), 0); }
       if (event.key === "F4" && !modal && view === "pos") { event.preventDefault(); openCheckout(); }
-      if (event.key === "Escape" && modal && !busy) setModal(null);
+      if (event.key === "Escape" && modal && !busy && !checkoutUncertain) setModal(null);
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [modal, busy, view, openCheckout]);
+  }, [modal, busy, view, openCheckout, checkoutUncertain]);
 
   const receivedCents = parseMoney(received);
   const canPay = receivedCents !== null && receivedCents >= totalCents && !busy && cart.length > 0;
@@ -152,11 +153,18 @@ export function PosWorkspace() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ requestId: checkoutRequestId.current, items: cart, receivedCents })
       }).then(r => readJson<{ sale: Receipt }>(r));
+      checkoutRequestId.current = "";
+      setCheckoutUncertain(false);
       setLastReceipt(data.sale); setModal(null); setCart([]);
       setNotice("Cash sale " + data.sale.receiptNumber + " saved successfully.");
       await refresh();
-    } catch (e) { setNotice(e instanceof Error ? e.message : "Could not confirm checkout."); }
-    finally { setBusy(false); }
+    } catch (e) {
+      // A request may have reached the database even if the response was lost.
+      // Keep the original cart, tender and idempotency key for a safe retry.
+      setCheckoutUncertain(true);
+      setNotice((e instanceof Error ? e.message : "Cannot confirm sale.") +
+        " Verify the sale or retry this SAME checkout without changing the amount.");
+    } finally { setBusy(false); }
   }
   async function createProduct(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -292,17 +300,19 @@ export function PosWorkspace() {
       </div>}
     </main>
     {modal === "checkout" && <div className="modal-overlay" role="presentation"><div className="modal-box" role="dialog" aria-modal="true" aria-labelledby="pay-title">
-      <div className="modal-top"><div><span className="label-top">PAYMENT</span><h2 id="pay-title">Complete cash sale</h2></div><button className="icon-control" aria-label="Close" disabled={busy} onClick={() => setModal(null)}><X size={20}/></button></div>
+      <div className="modal-top"><div><span className="label-top">PAYMENT</span><h2 id="pay-title">Complete cash sale</h2></div><button className="icon-control" aria-label="Close" disabled={busy || checkoutUncertain} onClick={() => { checkoutRequestId.current = ""; setModal(null); }}><X size={20}/></button></div>
       <div className="modal-content"><div className="due-box"><span>TOTAL AMOUNT DUE</span><strong>{formatMoney(totalCents)}</strong><small>{itemCount} items</small></div>
         <div className="cash-choice"><span><CreditCard size={19}/> Cash payment</span><CheckCircle2 size={19}/></div>
         <label className="field-label" htmlFor="tender">Cash received (LKR)</label>
-        <input id="tender" className="money-input" inputMode="decimal" autoFocus value={received} onChange={e => setReceived(e.target.value)}/>
+        <input id="tender" className="money-input" inputMode="decimal" autoFocus disabled={checkoutUncertain} value={received} onChange={e => setReceived(e.target.value)}/>
         <div className="change-line"><span>Change to return</span><strong>{formatMoney(changeCents)}</strong></div>
         {receivedCents === null ? <p className="form-error">Enter a valid amount (e.g. 1500.00).</p> :
           receivedCents < totalCents ? <p className="form-error">Cash received must cover the total.</p> : null}
-        <div className="notice-small">Prices are rechecked against the database when you confirm. No card payment is processed.</div>
+        <div className="notice-small">{checkoutUncertain
+          ? "Could not confirm sale status. Do NOT create a new order. Retry unchanged or check Sales History."
+          : "Prices are rechecked against the database when you confirm. No card payment is processed."}</div>
       </div>
-      <div className="modal-actions"><button className="secondary-action" onClick={() => setModal(null)} disabled={busy}>Cancel</button>
+      <div className="modal-actions"><button className="secondary-action" onClick={() => { checkoutRequestId.current = ""; setModal(null); }} disabled={busy || checkoutUncertain}>Cancel</button>
         <button className="primary-action" disabled={!canPay} onClick={() => void completeSale()}>{busy ? "Processing…" : "Save cash sale"}<ArrowRight size={17}/></button></div>
     </div></div>}
     {modal === "product" && <div className="modal-overlay" role="presentation"><div className="modal-box" role="dialog" aria-modal="true" aria-labelledby="new-product-title">
