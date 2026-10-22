@@ -3,10 +3,10 @@
  * Codespaces forwards HTTPS requests to an internal Next.js HTTP server.
  * Compare exact trusted browser authority, never wildcard GitHub subdomains.
  */
-type OriginEnvironment = Pick<
+type OriginEnvironment = Partial<Pick<
   NodeJS.ProcessEnv,
   "CODESPACES" | "CODESPACE_NAME" | "GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN" | "PORT"
->;
+>>;
 
 export function sameOrigin(request: Request, environment: OriginEnvironment = process.env): boolean {
   const originHeader = request.headers.get("origin");
