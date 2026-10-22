@@ -1,5 +1,6 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
+import { sameOrigin } from "./origin";
 export const SESSION_COOKIE = "forma_pos_session";
 const TTL_SECONDS = 8 * 60 * 60;
 
@@ -32,11 +33,6 @@ export function verifySession(value: string | undefined): boolean {
 export async function isAuthenticated() {
   const jar = await cookies();
   return verifySession(jar.get(SESSION_COOKIE)?.value);
-}
-export function sameOrigin(request: Request) {
-  const origin = request.headers.get("origin");
-  if (!origin) return true; // non-browser clients still require the signed session
-  try { return new URL(origin).host === new URL(request.url).host; } catch { return false; }
 }
 export function authError() {
   return Response.json({ error: "Please sign in again." }, { status: 401 });
