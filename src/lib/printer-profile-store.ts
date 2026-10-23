@@ -31,11 +31,12 @@ export function readNamedProfiles(raw: string | null): NamedProfile[] {
         offsetXmm: settings.offsetXmm,
         offsetYmm: settings.offsetYmm
       };
+      const profileName: string = item.name;
       try {
-        validName(item.name);
+        validName(profileName);
         validatePrinterProfile(candidate);
-        if (!entries.some(e => e.name.toLowerCase() === item.name.toLowerCase()))
-          entries.push({ name: item.name, settings: candidate });
+        if (!entries.some(e => e.name.toLowerCase() === profileName.toLowerCase()))
+          entries.push({ name: profileName, settings: candidate });
       } catch { /* Silently ignore damaged browser-only profile entries. */ }
     }
     return entries;
