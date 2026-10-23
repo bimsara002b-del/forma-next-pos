@@ -38,13 +38,16 @@ export async function POST(request: Request) {
   }
   const parsed = input.safeParse(body);
   if (!parsed.success) return Response.json({ error: "Invalid shift request." }, { status: 400 });
+  // Narrow the platform-aware session role to a store-only ShiftActor.
+  // A platform Super Admin has already been rejected above.
+  const shiftActor = { id: actor.id, displayName: actor.displayName, role: actor.role };
   try {
     const action = parsed.data;
     const result = action.action === "open"
-      ? { shift: await openCashShift(prisma, actor, action.openingFloatCents) }
+      ? { shift: await openCashShift(prisma, shiftActor, action.openingFloatCents) }
       : action.action === "close"
-      ? { closed: await closeCashShift(prisma, actor, action.countedCashCents) }
-      : { cash: await addCashMovement(prisma, actor, action) };
+      ? { closed: await closeCashShift(prisma, shiftActor, action.countedCashCents) }
+      : { cash: await addCashMovement(prisma, shiftActor, action) };
     return Response.json(result, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     if (error instanceof ShiftFailure) {
