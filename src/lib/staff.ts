@@ -1,11 +1,13 @@
 import { createHmac, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 const derive = promisify(scrypt);
-export type Role = "OWNER" | "MANAGER" | "CASHIER";
+export type Role = "SUPER_ADMIN" | "OWNER" | "MANAGER" | "CASHIER";
 export type Permission = "catalog.read" | "catalog.create" | "stock.manage" | "checkout" | "overview.read" | "staff.manage";
 export const staffMode = () => process.env.POS_STAFF_AUTH_ENABLED === "true";
-export const isRole = (value: string): value is Role => ["OWNER", "MANAGER", "CASHIER"].includes(value);
+export const isRole = (value: string): value is Role => ["SUPER_ADMIN", "OWNER", "MANAGER", "CASHIER"].includes(value);
+export const isPlatformSuperAdmin = (role: Role) => role === "SUPER_ADMIN";
 export function hasPermission(role: Role, permission: Permission): boolean {
+  if (role === "SUPER_ADMIN") return false; // No implicit store permissions.
   if (role === "OWNER") return true;
   if (role === "MANAGER") return permission !== "staff.manage";
   return ["catalog.read", "checkout", "overview.read"].includes(permission);

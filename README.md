@@ -86,3 +86,22 @@ The Inventory view includes an advanced section where owner/manager can:
 - Review receiving receipts and stock movement history.
 
 **Do not run in production.** For an isolated local demo, back up the SQLite file first, then run \`npm run db:generate\` and \`npm run db:push\` after reviewing schema changes. CI uses a separate \`inventory-integration.test.db\` file for receiving/count tests and does not touch user databases. Any uncertain receiving outcome must be retried with the same request ID and unchanged details. No suppliers/AP, purchase approvals, tax, exports or multi-tenant isolation are included.
+
+
+## Milestone 06 — Separate local Super Admin identity
+
+The platform `SUPER_ADMIN` role is not store `OWNER`. Super Admin authenticates with its own password via staff login and is directed to protected `/super-admin`. Local staff account counts are shown; full multi-tenant SaaS administration is NOT implemented. Store owners cannot create the `SUPER_ADMIN` role or manage this account via the staff API. Store checkout, stock and sales permissions do not apply to Super Admin.
+
+**Private Codespaces/local pilot only.** Back up your SQLite demo database first. From the repository root:
+
+```bash
+npm install
+npm run setup
+npm run db:generate
+npm run db:push
+npm run superadmin:bootstrap
+```
+
+The bootstrap creates username `superadmin` and prints a random **one-time password** only in your private terminal. Save it privately: the database stores only a salted scrypt hash. Set `POS_STAFF_AUTH_ENABLED=true` in gitignored `.env`, restart `npm run dev`, and sign in at `/login`. To rotate an existing Super Admin password and invalidate sessions: `npm run superadmin:reset-password`. Normal bootstrapping does not change an existing account.
+
+Do not commit `.env` or passwords, or expose Codespaces ports publicly. This is not production-ready: SaaS tenants, subscription billing, MFA, and platform-wide security controls are future work.

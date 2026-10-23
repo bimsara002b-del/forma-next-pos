@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hashPassword, matchesPassword, hasPermission, newStaffSession, verifyStaffSession } from "../src/lib/staff";
+import { hashPassword, matchesPassword, hasPermission, isRole, isPlatformSuperAdmin, newStaffSession, verifyStaffSession } from "../src/lib/staff";
 const secret = "test-session-key-is-long-enough-01234567890";
 describe("local role permissions and staff sessions", () => {
   it("enforces roles", () => {
@@ -8,6 +8,12 @@ describe("local role permissions and staff sessions", () => {
     expect(hasPermission("MANAGER", "stock.manage")).toBe(true);
     expect(hasPermission("CASHIER", "stock.manage")).toBe(false);
     expect(hasPermission("CASHIER", "checkout")).toBe(true);
+    expect(isRole("SUPER_ADMIN")).toBe(true);
+    expect(isPlatformSuperAdmin("SUPER_ADMIN")).toBe(true);
+    expect(isPlatformSuperAdmin("OWNER")).toBe(false);
+    expect(hasPermission("SUPER_ADMIN", "staff.manage")).toBe(false);
+    expect(hasPermission("SUPER_ADMIN", "checkout")).toBe(false);
+    expect(hasPermission("SUPER_ADMIN", "overview.read")).toBe(false);
   });
   it("hashes and verifies passwords with unique salts", async () => {
     const a = await hashPassword("local-staff-password");
