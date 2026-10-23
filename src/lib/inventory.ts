@@ -1,17 +1,20 @@
 import { PrismaClient, type Prisma } from "@prisma/client";
+import { nextPurchaseStatus } from "./procurement";
 
 export type ReceivingInput = {
   requestId: string;
   supplierName: string;
   reference: string;
   receivedById: string;
+  purchaseOrderId?: string | null;
   lines: { productId: string; quantity: number; unitCostCents: number }[];
 };
 type Receipt = Prisma.InventoryReceiptGetPayload<{ include: { lines: true } }>;
 
 export class InventoryFailure extends Error {
   constructor(public readonly code:
-    "INVALID_LINES" | "INVALID_PRODUCT" | "STOCK_OVERFLOW" | "REQUEST_CONFLICT" | "RETRY_LATER" | "STOCK_CHANGED") {
+    "INVALID_LINES" | "INVALID_PRODUCT" | "STOCK_OVERFLOW" | "REQUEST_CONFLICT" | "RETRY_LATER" | "STOCK_CHANGED" | "ORDER_NOT_FOUND" | "ORDER_NOT_RECEIVABLE" |
+    "ORDER_SUPPLIER_MISMATCH" | "ORDER_LINE_CONFLICT") {
     super(code);
     this.name = "InventoryFailure";
   }
@@ -34,7 +37,9 @@ export function normalizeReceivingLines(lines: ReceivingInput["lines"]) {
 }
 export function matchesReceipt(receipt: Receipt, input: ReceivingInput): boolean {
   if (receipt.supplierName !== input.supplierName || receipt.reference !== input.reference ||
-    receipt.receivedById !== input.receivedById || receipt.lines.length !== input.lines.length) return false;
+    receipt.receivedById !== input.receivedById ||
+    (receipt.purchaseOrderId ?? null) !== (input.purchaseOrderId ?? null) ||
+    receipt.lines.length !== input.lines.length) return false;
   const byProduct = new Map(input.lines.map(line => [line.productId, line]));
   return receipt.lines.every(line => {
     const request = byProduct.get(line.productId);
@@ -62,6 +67,48 @@ export async function receiveInventory(db: PrismaClient, input: ReceivingInput) 
       });
       if (existing) return replay(existing);
 
+      // The purchase order, line counters, received stock and receipt record
+      // must all commit together. A replay above must return before status checks
+      // so a successful final delivery is still safely replayable after closure.
+      if (input.purchaseOrderId) {
+        const order = await tx.purchaseOrder.findUnique({
+          where: { id: input.purchaseOrderId },
+          include: { supplier: true, lines: true }
+        });
+        if (!order) throw new InventoryFailure("ORDER_NOT_FOUND");
+        if (!["ORDERED", "PARTIALLY_RECEIVED"].includes(order.status)) {
+          throw new InventoryFailure("ORDER_NOT_RECEIVABLE");
+        }
+        if (order.supplier.name !== input.supplierName) {
+          throw new InventoryFailure("ORDER_SUPPLIER_MISMATCH");
+        }
+        const orderLines = new Map(order.lines.map(line => [line.productId, line]));
+        const increments = new Map(input.lines.map(line => [line.productId, line.quantity]));
+        for (const line of input.lines) {
+          const ordered = orderLines.get(line.productId);
+          if (!ordered || line.quantity > ordered.quantityOrdered - ordered.quantityReceived) {
+            throw new InventoryFailure("ORDER_LINE_CONFLICT");
+          }
+          const changed = await tx.purchaseOrderLine.updateMany({
+            where: {
+              id: ordered.id,
+              quantityReceived: { lte: ordered.quantityOrdered - line.quantity }
+            },
+            data: { quantityReceived: { increment: line.quantity } }
+          });
+          if (changed.count !== 1) throw new InventoryFailure("ORDER_LINE_CONFLICT");
+        }
+        const nextStatus = nextPurchaseStatus(order.lines.map(line => ({
+          quantityOrdered: line.quantityOrdered,
+          quantityReceived: line.quantityReceived + (increments.get(line.productId) ?? 0)
+        })));
+        const shifted = await tx.purchaseOrder.updateMany({
+          where: { id: order.id, status: order.status },
+          data: { status: nextStatus }
+        });
+        if (shifted.count !== 1) throw new InventoryFailure("ORDER_NOT_RECEIVABLE");
+      }
+
       const products = await tx.product.findMany({
         where: { id: { in: input.lines.map(line => line.productId) }, isActive: true }
       });
@@ -81,6 +128,7 @@ export async function receiveInventory(db: PrismaClient, input: ReceivingInput) 
         data: {
           requestId: input.requestId, supplierName: input.supplierName,
           reference: input.reference, receivedById: input.receivedById,
+          purchaseOrderId: input.purchaseOrderId ?? null,
           lines: { create: input.lines.map(line => ({
             productId: line.productId, productName: byId.get(line.productId)!.name,
             quantity: line.quantity, unitCostCents: line.unitCostCents
