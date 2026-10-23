@@ -9,7 +9,7 @@ type Item = {
   isActive: boolean;
 };
 type ReceiptRow = {
-  id: string; reference: string; supplierName: string; createdAt: string;
+  id: string; reference: string; supplierName: string; createdAt: string; purchaseOrderId?: string | null;
   lines: { productName: string; quantity: number; unitCostCents: number }[];
 };
 type MovementRow = {
@@ -257,7 +257,7 @@ export function AdvancedInventory({ onUpdated }: { onUpdated: () => Promise<void
       <div className="panel-header"><h3>Purchase receiving history</h3><span className="subtle-pill">Latest 25</span></div>
       <div className="table-scroll"><table><thead><tr><th>Invoice</th><th>Supplier</th><th>Date</th><th>Items received</th></tr></thead>
         <tbody>{data.recentReceipts.map(receipt => <tr key={receipt.id}>
-          <td className="table-strong">{receipt.reference}</td><td>{receipt.supplierName}</td>
+          <td className="table-strong">{receipt.reference}{receipt.purchaseOrderId ? " (PO linked)" : ""}</td><td>{receipt.supplierName}</td>
           <td>{new Date(receipt.createdAt).toLocaleString("en-LK")}</td><td>{receipt.lines.map(line =>
             line.productName+" × "+line.quantity+" ("+formatMoney(line.unitCostCents)+")").join(", ")}</td>
         </tr>)}</tbody></table>{!data.recentReceipts.length && <p className="table-empty">No receiving records yet.</p>}</div>

@@ -7,6 +7,7 @@ export const dynamic = "force-dynamic";
 
 const receive = z.object({
   action: z.literal("receive"), requestId: z.string().uuid(),
+  purchaseOrderId: z.string().min(1).optional(),
   supplierName: z.string().trim().min(2).max(100),
   reference: z.string().trim().min(2).max(80),
   lines: z.array(z.object({
@@ -75,7 +76,11 @@ export async function POST(request: Request) {
         STOCK_OVERFLOW: "Receiving would exceed maximum supported stock.",
         REQUEST_CONFLICT: "Receipt ID already used with different details. Inspect inventory history.",
         RETRY_LATER: "Receipt status uncertain. Retry the same request without changing items.",
-        STOCK_CHANGED: "Stock changed since you loaded the product. Refresh and recount."
+        STOCK_CHANGED: "Stock changed since you loaded the product. Refresh and recount.",
+        ORDER_NOT_FOUND: "Purchase order does not exist.",
+        ORDER_NOT_RECEIVABLE: "Purchase order is not in an open receiving state.",
+        ORDER_SUPPLIER_MISMATCH: "Receipt supplier does not match purchase order supplier.",
+        ORDER_LINE_CONFLICT: "Received quantity is above the outstanding order amount or product is not on this order."
       };
       return Response.json({ error: messages[error.code] }, { status:
         error.code === "INVALID_LINES" ? 422 : error.code === "RETRY_LATER" ? 503 : 409 });

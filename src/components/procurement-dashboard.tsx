@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { formatMoney, parseMoney } from "@/lib/money";
 type Supplier={id:string;name:string;isActive:boolean};
 type Item={id:string;name:string;sku:string;stockQty:number;minStockQty:number;costCents:number;recommendedQty?:number};
-type Order={id:string;orderNumber:string;status:string;createdAt:string;supplier:Supplier;lines:{id:string;quantityOrdered:number;quantityReceived:number;unitCostCents:number;product:{name:string}}[]};
+type Order={id:string;orderNumber:string;status:string;createdAt:string;supplier:Supplier;lines:{id:string;quantityOrdered:number;quantityReceived:number;unitCostCents:number;product:{id:string;name:string}}[]};
 type Snapshot={suppliers:Supplier[];orders:Order[];lowStock:Item[];lowStockTruncated:boolean};
 type Catalog={products:Item[]};
 async function json<T>(path:string, init?:RequestInit):Promise<T>{
@@ -20,6 +20,13 @@ export function ProcurementDashboard(){
   const [quantity,setQuantity]=useState("1");
   const [unitCost,setUnitCost]=useState("0.00");
   const [notes,setNotes]=useState("");
+  const [deliveryOrderId,setDeliveryOrderId]=useState("");
+  const [invoice,setInvoice]=useState("");
+  const [deliveryQuantities,setDeliveryQuantities]=useState<Record<string,string>>({});
+  const [pendingDelivery,setPendingDelivery]=useState<{
+    action:"receive";requestId:string;purchaseOrderId:string;supplierName:string;reference:string;
+    lines:{productId:string;quantity:number;unitCostCents:number}[];
+  }|null>(null);
   const [busy,setBusy]=useState(false);
   const [message,setMessage]=useState("");
   const [error,setError]=useState("");
@@ -36,6 +43,34 @@ export function ProcurementDashboard(){
     if(!supplierId||!selectedProduct||!Number.isSafeInteger(qty)||qty<1||cost===null){setError("Select supplier/product and enter valid cost/quantity.");return;}
     await command({action:"order-create",supplierId,notes,lines:[{productId:selectedProduct,quantityOrdered:qty,unitCostCents:cost}]},
       "Purchase order saved as DRAFT. No inventory was received.");
+  }
+  const deliveryOrder=data.orders.find(o=>o.id===deliveryOrderId);
+  async function postDelivery(payload:NonNullable<typeof pendingDelivery>){
+    setBusy(true);setError("");setMessage("");
+    setPendingDelivery(payload);
+    try{
+      const answer=await json<{replay:boolean}>("/api/inventory",{
+        method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)
+      });
+      setPendingDelivery(null);setInvoice("");setDeliveryQuantities({});
+      await refresh();setMessage(answer.replay?"Original goods receipt confirmed; no duplicate stock.":"Delivery received and PO totals updated.");
+    }catch(e){setError((e instanceof Error?e.message:"Receiving status unknown")+
+      " If status is uncertain, retry the SAME delivery request ID.");}
+    finally{setBusy(false);}
+  }
+  function receiveDelivery(e:FormEvent){
+    e.preventDefault();if(!deliveryOrder||busy||pendingDelivery)return;
+    const lines=deliveryOrder.lines.map(line=>({
+      productId:line.product.id,quantity:Number(deliveryQuantities[line.id]||"0"),unitCostCents:line.unitCostCents
+    })).filter(line=>line.quantity>0);
+    if(!invoice.trim()||invoice.trim().length<2||!lines.length||
+      lines.some(line=>!Number.isSafeInteger(line.quantity)||line.quantity>100000||
+        line.quantity> (deliveryOrder.lines.find(l=>l.product.id===line.productId)?.quantityOrdered??0)-
+          (deliveryOrder.lines.find(l=>l.product.id===line.productId)?.quantityReceived??0))){
+      setError("Enter invoice and quantities within each remaining PO line.");return;
+    }
+    void postDelivery({action:"receive",requestId:crypto.randomUUID(),purchaseOrderId:deliveryOrder.id,
+      supplierName:deliveryOrder.supplier.name,reference:invoice.trim(),lines});
   }
   const style={padding:"10px 12px",border:"1px solid #dce4ea",borderRadius:8,width:"100%"} as const;
   return <main className="content-scroll" style={{maxWidth:1150,margin:"0 auto"}}>
@@ -69,6 +104,31 @@ export function ProcurementDashboard(){
         <label>Notes<input style={style} value={notes} maxLength={250} onChange={e=>setNotes(e.target.value)}/></label>
       </div><button style={{marginTop:12}} className="small-action" disabled={busy}>Create draft PO</button></form>
     </div>
+    <div className="panel" style={{padding:20,marginBottom:20}}>
+      <h3>Receive items against purchase order</h3>
+      <p className="small-disclaimer">Receive an actual delivery only. Quantities cannot exceed outstanding items; stock and PO counters update atomically.</p>
+      <form onSubmit={receiveDelivery}>
+        <label>Open PO<select style={style} value={deliveryOrderId} disabled={busy||!!pendingDelivery} onChange={e=>{setDeliveryOrderId(e.target.value);setDeliveryQuantities({});setInvoice("");}}>
+          <option value="">Select purchase order</option>
+          {data.orders.filter(o=>["ORDERED","PARTIALLY_RECEIVED"].includes(o.status)).map(o=>
+            <option key={o.id} value={o.id}>{o.orderNumber} — {o.supplier.name}</option>)}
+        </select></label>
+        {deliveryOrder&&<><label>Delivery invoice<input style={style} required minLength={2} maxLength={80}
+          value={invoice} disabled={busy||!!pendingDelivery} onChange={e=>setInvoice(e.target.value)}/></label>
+          {deliveryOrder.lines.map(line=><label key={line.id} style={{display:"block",marginTop:12}}>
+            {line.product.name}: ordered {line.quantityOrdered}, received {line.quantityReceived}, remaining {line.quantityOrdered-line.quantityReceived}
+            <input style={style} type="number" min={0} max={line.quantityOrdered-line.quantityReceived} step={1}
+              disabled={busy||!!pendingDelivery} value={deliveryQuantities[line.id]??"0"}
+              onChange={e=>setDeliveryQuantities(old=>({...old,[line.id]:e.target.value}))}/>
+          </label>)}
+        </>}
+        <div className="stock-actions" style={{marginTop:14}}>
+          <button className="small-action" type="submit" disabled={!deliveryOrder||busy||!!pendingDelivery}>Post delivery</button>
+          {pendingDelivery&&<button type="button" disabled={busy} onClick={()=>void postDelivery(pendingDelivery)}>Retry SAME delivery</button>}
+        </div>
+        {pendingDelivery&&<p role="status">Receiving status uncertain. Receipt details are locked until retry.</p>}
+      </form>
+    </div>
     <div className="panel" style={{marginBottom:20}}><div className="panel-header"><h3>Purchase orders</h3></div>
       <div className="table-scroll"><table><thead><tr><th>Number</th><th>Supplier</th><th>Status</th><th>Lines</th><th>Action</th></tr></thead><tbody>
         {data.orders.map(o=><tr key={o.id}><td>{o.orderNumber}</td><td>{o.supplier.name}</td><td>{o.status}</td>
@@ -77,6 +137,6 @@ export function ProcurementDashboard(){
             {(o.status==="DRAFT"||o.status==="ORDERED")&&<button disabled={busy}
               onClick={()=>void command({action:"cancel",orderId:o.id},"PO cancelled.")}>Cancel</button>}</td></tr>)}
         </tbody></table></div></div>
-    <p className="small-disclaimer">Purchase orders are administrative planning records, not supplier payments. No live supplier messaging, accounts payable, linked partial receiving, or delivery reconciliation yet.</p>
+    <p className="small-disclaimer">Purchase orders are administrative planning records, not supplier payments. No live supplier messaging or accounts payable. Linked partial receiving is supported for this single-store demo.</p>
   </main>;
 }
