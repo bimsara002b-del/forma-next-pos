@@ -47,7 +47,6 @@ export function PosWorkspace({canManageStaff=false,canManageInventory=true}:{can
   const [received, setReceived] = useState("");
   const [busy, setBusy] = useState(false);
   const [checkoutUncertain, setCheckoutUncertain] = useState(false);
-  const [busyStock, setBusyStock] = useState("");
   const [notice, setNotice] = useState("");
   const [lastReceipt, setLastReceipt] = useState<Receipt | null>(null);
   const [newProduct, setNewProduct] = useState<NewProduct>(emptyNew);
@@ -188,18 +187,6 @@ export function PosWorkspace({canManageStaff=false,canManageInventory=true}:{can
     } catch (e) { setNotice(e instanceof Error ? e.message : "Product was not created."); }
     finally { setBusy(false); }
   }
-  async function adjustStock(product: Product, delta: number) {
-    setBusyStock(product.id); setNotice("");
-    try {
-      await fetch("/api/stock", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ productId: product.id, delta, reason: delta > 0 ? "RECEIVING" : "ADJUSTMENT" })
-      }).then(r => readJson(r));
-      await refresh();
-      setNotice(product.name + (delta > 0 ? ": 10 units received." : ": 1 unit adjusted out."));
-    } catch (e) { setNotice(e instanceof Error ? e.message : "Stock update failed."); }
-    finally { setBusyStock(""); }
-  }
   async function logout() {
     try { await fetch("/api/auth/logout", { method: "POST" }); } finally { router.replace("/login"); router.refresh(); }
   }
@@ -294,8 +281,7 @@ export function PosWorkspace({canManageStaff=false,canManageInventory=true}:{can
             <tbody>{products.map(product => <tr key={product.id}>
               <td className="table-strong">{product.name}</td><td className="mono">{product.sku}</td><td>{product.category}</td><td>{formatMoney(product.priceCents)}</td>
               <td><span className={"stock-pill" + (product.stockQty <= 5 ? " low" : "")}>{product.stockQty} units</span></td>
-              <td><div className="stock-actions"><button disabled={busyStock === product.id} onClick={() => void adjustStock(product, 10)} aria-label={"Receive 10 " + product.name}><Plus size={13}/> 10</button>
-                <button disabled={busyStock === product.id || product.stockQty === 0} onClick={() => void adjustStock(product, -1)} aria-label={"Adjust out 1 " + product.name}><Minus size={13}/> 1</button></div></td>
+              <td><span className="small-disclaimer">Use Stock Adjustments below</span></td>
             </tr>)}</tbody></table></div>
           {!products.length && <div className="table-empty">No products yet. Add a product to begin.</div>}
         </div>
