@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import { postCashReturn, calculateRefund } from "../src/lib/returns";
 import { commitCashCheckout } from "../src/lib/checkout";
-import { openCashShift } from "../src/lib/shifts";
+import { addCashMovement, openCashShift } from "../src/lib/shifts";
 const url=process.env.POS_RETURN_TEST_DATABASE_URL;
 const db=url==="file:./returns-integration.test.db"?
  new PrismaClient({datasources:{db:{url}}}):null;
@@ -49,9 +49,18 @@ describe("cash returns in isolated disposable SQLite DB",()=>{
   await expect(postCashReturn(db!,base)).rejects.toMatchObject({code:"NO_OPEN_SHIFT"});
   await openCashShift(db!,actor,100);
   await expect(postCashReturn(db!,{...base,lines:[{...base.lines[0],quantity:4}]})).rejects.toMatchObject({code:"ALREADY_RETURNED"});
-  // There is 1500 cents of recorded cash sales in this shift.
-  const result=await postCashReturn(db!,{...base,lines:[{...base.lines[0],quantity:3}]});
+  // The original sale occurred BEFORE the new shift. Only its 100-cent float
+  // is available now; a 1500-cent refund must be blocked, not paid twice.
+  const fullReturn={...base,lines:[{...base.lines[0],quantity:3}]};
+  await expect(postCashReturn(db!,fullReturn)).rejects.toMatchObject({code:"INSUFFICIENT_DRAWER_CASH"});
+  expect(await db!.saleReturn.count()).toBe(0);
+  expect(await db!.cashMovement.count()).toBe(0);
+  // Record a real cash-in to replenish the current shift before retrying.
+  await addCashMovement(db!,actor,{requestId:randomUUID(),type:"CASH_IN",amountCents:1400,note:"Drawer refund float"});
+  const result=await postCashReturn(db!,fullReturn);
   expect(result.returnRecord.refundCents).toBe(1500);
+  expect(await db!.cashMovement.count({where:{type:"CASH_IN"}})).toBe(1);
+  expect(await db!.cashMovement.count({where:{type:"REFUND"}})).toBe(1);
   expect(await db!.stockMovement.count({where:{reason:"CUSTOMER_RETURN"}})).toBe(0);
   expect(await db!.saleReturn.count()).toBe(1);
  });
