@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { formatMoney, parseMoney } from "@/lib/money";
+import { StockAdjustmentPanel } from "./stock-adjustment-panel";
 
 type Item = {
   id: string; name: string; sku: string; barcode: string | null; category: string;
@@ -14,6 +15,7 @@ type ReceiptRow = {
 };
 type MovementRow = {
   id: string; reason: string; changeQty: number; reference: string | null;
+  beforeQty?: number | null; afterQty?: number | null; note?: string | null; performedById?: string | null;
   createdAt: string; product: { name: string };
 };
 type InventoryData = { products: Item[]; recentReceipts: ReceiptRow[]; movements: MovementRow[] };
@@ -172,6 +174,7 @@ export function AdvancedInventory({ onUpdated }: { onUpdated: () => Promise<void
     </div><button type="button" className="small-action" disabled={busy} onClick={() => void refresh()}>Refresh history</button></div>
     {error && <div className="form-error" role="alert" style={{marginBottom:16}}>{error}</div>}
     {notice && <p role="status" style={{color:"#16835b"}}>{notice}</p>}
+    <StockAdjustmentPanel products={data.products} onUpdated={async()=>{await Promise.all([refresh(),onUpdated()]);}} />
     <div className="panel" style={{padding:20,marginBottom:20}}>
       <h3>Receive purchased products</h3>
       <p className="small-disclaimer">Receiving updates stock and latest cost, preserving a supplier and invoice reference.</p>
@@ -268,7 +271,7 @@ export function AdvancedInventory({ onUpdated }: { onUpdated: () => Promise<void
         <tbody>{data.movements.map(movement => <tr key={movement.id}>
           <td>{new Date(movement.createdAt).toLocaleString("en-LK")}</td>
           <td>{movement.product.name}</td><td>{movement.reason}</td>
-          <td>{movement.changeQty>0?"+":""}{movement.changeQty}</td><td>{movement.reference??"—"}</td>
+          <td>{movement.changeQty>0?"+":""}{movement.changeQty}</td><td>{movement.note??movement.reference??"—"}{movement.beforeQty!==null && movement.beforeQty!==undefined ? ` (${movement.beforeQty} → ${movement.afterQty})` : ""}</td>
         </tr>)}</tbody></table>{!data.movements.length && <p className="table-empty">No movements yet.</p>}</div>
     </div>
   </section>;
