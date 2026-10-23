@@ -15,6 +15,11 @@ describe("label template and calibration",()=>{
   expect(html).toContain("left:1mm");
   expect((html.match(/<article class="label/g)||[]).length).toBe(2);
  });
+ it("accepts normal shop names and blocks control characters",()=>{
+  expect(()=>validatePrinterProfile({...DEFAULT_PRINTER_PROFILE,storeName:"My Shop 24"})).not.toThrow();
+  expect(()=>validatePrinterProfile({...DEFAULT_PRINTER_PROFILE,storeName:"<My Shop>"})).not.toThrow();
+  expect(()=>validatePrinterProfile({...DEFAULT_PRINTER_PROFILE,storeName:"Shop\\nName".replace("\\\\n","\\n")})).toThrow();
+ });
  it("rejects out-of-range settings",()=>{
   expect(()=>validatePrinterProfile({...DEFAULT_PRINTER_PROFILE,offsetXmm:10})).toThrow();
   expect(()=>validatePrinterProfile({...DEFAULT_PRINTER_PROFILE,barcodeHeightMm:4})).toThrow();

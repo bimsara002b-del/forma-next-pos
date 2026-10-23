@@ -61,7 +61,8 @@ export const DEFAULT_PRINTER_PROFILE: PrinterProfile = {
 };
 export function validatePrinterProfile(profile: PrinterProfile): void {
   if (!["classic", "compact", "price-first"].includes(profile.template) ||
-    profile.storeName.length > 36 || /[\\x00-\\x1f\\x7f]/.test(profile.storeName) ||
+    profile.storeName.length > 36 ||
+    [...profile.storeName].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127) ||
     !Number.isFinite(profile.barcodeHeightMm) || profile.barcodeHeightMm < 7 || profile.barcodeHeightMm > 16 ||
     !Number.isFinite(profile.offsetXmm) || Math.abs(profile.offsetXmm) > 2 ||
     !Number.isFinite(profile.offsetYmm) || Math.abs(profile.offsetYmm) > 2) {
@@ -81,7 +82,8 @@ export function renderLabelSheet(lines: LabelLine[], paper: LabelPaper, options:
     const store = profile.storeName ? '<div class="store">' + escaped(profile.storeName) + '</div>' : '';
     const contents = profile.template === 'price-first' ? store + amount + name : store + name;
     const after = profile.template === 'price-first' ? codeText : codeText + amount;
-    const markup = '<article class="label template-' + profile.template + '">' + contents + '<div class="bars">' + barcodeSvg(code) +
+    const labelClass = profile.template === "classic" ? "label" : "label template-" + profile.template;
+    const markup = '<article class="' + labelClass + '">' + contents + '<div class="bars">' + barcodeSvg(code) +
       '</div>' + after + '</article>';
     return Array.from({ length: copies }, () => markup);
   }).join("");
