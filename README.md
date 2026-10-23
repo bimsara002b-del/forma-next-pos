@@ -76,6 +76,18 @@ A local REG-01 register can open and close a shift, record cash in/out with uniq
 For local testing, back up your isolated SQLite demo database first, generate the Prisma client and apply the additive schema only to that demo (npm run db:generate; npm run db:push). Do not run db:push on any production database. Open the Cash Shifts navigation tab, open a shift, make a cash sale, then close with counted cash. Verify that the receipt is attributed to the shift and stock remains correct. Keep Codespaces ports Private.
 
 
+## Advanced Inventory UI and isolated integration tests (Milestone 06 follow-up)
+
+The Inventory view includes an advanced section where owner/manager can:
+- Edit SKU, barcode, product prices, cost and low-stock threshold without changing old sale lines.
+- Soft-archive or restore items while keeping past sale/movement records.
+- Receive several products against a supplier invoice; quantities and latest cost are applied transactionally. Retrying the same UUID and exact payload does not double-receive.
+- Reconcile a physical stock count only when the previously displayed stock still matches; a concurrent sale makes the count fail with a conflict.
+- Review receiving receipts and stock movement history.
+
+**Do not run in production.** For an isolated local demo, back up the SQLite file first, then run \`npm run db:generate\` and \`npm run db:push\` after reviewing schema changes. CI uses a separate \`inventory-integration.test.db\` file for receiving/count tests and does not touch user databases. Any uncertain receiving outcome must be retried with the same request ID and unchanged details. No suppliers/AP, purchase approvals, tax, exports or multi-tenant isolation are included.
+
+
 ## Milestone 06 — Separate local Super Admin identity
 
 The platform `SUPER_ADMIN` role is not store `OWNER`. Super Admin authenticates with its own password via staff login and is directed to protected `/super-admin`. Local staff account counts are shown; full multi-tenant SaaS administration is NOT implemented. Store owners cannot create the `SUPER_ADMIN` role or manage this account via the staff API. Store checkout, stock and sales permissions do not apply to Super Admin.
