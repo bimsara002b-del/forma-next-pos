@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { Prisma, PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "@prisma/client";
 
 export type PurchaseLineInput = { productId: string; quantityOrdered: number; unitCostCents: number };
 export type PurchaseDraftInput = {

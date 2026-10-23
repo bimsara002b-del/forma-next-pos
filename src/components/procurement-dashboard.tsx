@@ -6,12 +6,14 @@ type Supplier={id:string;name:string;isActive:boolean};
 type Item={id:string;name:string;sku:string;stockQty:number;minStockQty:number;costCents:number;recommendedQty?:number};
 type Order={id:string;orderNumber:string;status:string;createdAt:string;supplier:Supplier;lines:{id:string;quantityOrdered:number;quantityReceived:number;unitCostCents:number;product:{name:string}}[]};
 type Snapshot={suppliers:Supplier[];orders:Order[];lowStock:Item[];lowStockTruncated:boolean};
+type Catalog={products:Item[]};
 async function json<T>(path:string, init?:RequestInit):Promise<T>{
   const response=await fetch(path,{cache:"no-store",...init});const data=await response.json();
   if(!response.ok)throw Error(data.error||"Request failed");return data as T;
 }
 export function ProcurementDashboard(){
   const [data,setData]=useState<Snapshot>({suppliers:[],orders:[],lowStock:[],lowStockTruncated:false});
+  const [catalog,setCatalog]=useState<Item[]>([]);
   const [supplierName,setSupplierName]=useState("");
   const [supplierId,setSupplierId]=useState("");
   const [selectedProduct,setSelectedProduct]=useState("");
@@ -21,8 +23,8 @@ export function ProcurementDashboard(){
   const [busy,setBusy]=useState(false);
   const [message,setMessage]=useState("");
   const [error,setError]=useState("");
-  async function refresh(){setData(await json<Snapshot>("/api/procurement"));}
-  useEffect(()=>{let live=true;void json<Snapshot>("/api/procurement").then(s=>{if(live)setData(s);}).catch(e=>{if(live)setError(String(e));});return()=>{live=false;};},[]);
+  async function refresh(){const [snapshot,products]=await Promise.all([json<Snapshot>("/api/procurement"),json<Catalog>("/api/products")]);setData(snapshot);setCatalog(products.products);}
+  useEffect(()=>{let live=true;void Promise.all([json<Snapshot>("/api/procurement"),json<Catalog>("/api/products")]).then(([s,p])=>{if(live){setData(s);setCatalog(p.products);}}).catch(e=>{if(live)setError(String(e));});return()=>{live=false;};},[]);
   async function command(payload:object,done:string){
     setBusy(true);setError("");setMessage("");
     try{await json("/api/procurement",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});await refresh();setMessage(done);}
@@ -60,7 +62,8 @@ export function ProcurementDashboard(){
       <form onSubmit={e=>void createOrder(e)}><div className="form-grid">
         <label>Supplier<select required style={style} value={supplierId} onChange={e=>setSupplierId(e.target.value)}><option value="">Select supplier</option>
           {data.suppliers.filter(s=>s.isActive).map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
-        <label>Product ID<input style={style} value={selectedProduct} required onChange={e=>setSelectedProduct(e.target.value)} placeholder="Product ID from inventory"/></label>
+        <label>Product<select style={style} value={selectedProduct} required onChange={e=>{const id=e.target.value;setSelectedProduct(id);const p=catalog.find(x=>x.id===id);if(p)setUnitCost((p.costCents/100).toFixed(2));}}>
+          <option value="">Choose product</option>{catalog.map(p=><option value={p.id} key={p.id}>{p.name} ({p.sku})</option>)}</select></label>
         <label>Quantity<input style={style} type="number" required min={1} max={100000} value={quantity} onChange={e=>setQuantity(e.target.value)}/></label>
         <label>Unit cost (LKR)<input style={style} inputMode="decimal" value={unitCost} onChange={e=>setUnitCost(e.target.value)}/></label>
         <label>Notes<input style={style} value={notes} maxLength={250} onChange={e=>setNotes(e.target.value)}/></label>
