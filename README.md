@@ -123,3 +123,8 @@ The StockMovement schema gained OPTIONAL audit fields for new adjustments, prese
 ## Barcode Labels
 
 Manager/Owner can print Code 128 barcode labels using the saved product barcode or SKU. 40 × 30 mm and 50 × 30 mm thermal labels or 48 × 30 mm A4 sheet labels are supported, with 1–100 copies, optional product name, price and human-readable code. Browser print opens a separate print document and relies on an installed printer; no direct printer driver or stock changes. Use 100% scaling and verify scanner quality on real hardware. Only printable ASCII barcode values of up to 40 characters are supported.
+
+
+## Bulk Barcode Printing (Draft development)
+
+Manager or Owner can now queue up to 30 different active products and a combined maximum of 200 labels per print job, choosing 1–100 copies per product. Labels can be mixed on one 40×30/50×30 mm thermal print job or A4 grid of 48×30 mm labels. The browser print preview opens a separate page with a Print / Reprint button. Labels use a validated Code 128 of stored product barcode or SKU, and the job has no inventory side effects. Print at 100% scale, verify actual paper alignment and scanner readability before merchant use. Requires no schema changes.

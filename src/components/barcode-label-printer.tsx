@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { code128Bars,fitsLabel } from "@/lib/barcodes";
+import { BulkBarcodeLabels } from "./bulk-barcode-labels";
 type Product={id:string;name:string;sku:string;barcode:string|null;priceCents:number};
 type Size="40x30"|"50x30"|"A4";
 function escapeHtml(x:string){return x.replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#39;");}
@@ -76,6 +77,7 @@ export function BarcodeLabelPrinter(){
    {product&&!valid&&<p className="form-error">Barcode must be printable ASCII, up to 40 characters, and fit chosen label width.</p>}
    <button className="small-action" style={{marginTop:18}} disabled={!valid||!product}>Print barcode labels</button>
   </form></div>
+  <BulkBarcodeLabels products={products} />
   <p className="small-disclaimer" style={{marginTop:16}}>Set paper size and 100% print scaling in your browser printer settings. Test real label printer and scanner readability. No stock is modified by printing.</p>
  </main>;
 }
