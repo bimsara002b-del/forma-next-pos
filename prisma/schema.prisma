@@ -39,6 +39,7 @@ model Sale {
   paymentMethod       String     @default("CASH")
   createdAt           DateTime   @default(now())
   items               SaleItem[]
+  returns             SaleReturn[]
   shiftId             String?
   shift               CashShift?  @relation(fields: [shiftId], references: [id])
 
@@ -57,6 +58,8 @@ model SaleItem {
   // Null for historical sales or when product cost is not known.
   unitCostCents  Int?
   lineCostCents  Int?
+  returnedQty    Int     @default(0)
+  returnLines    SaleReturnLine[]
   sale           Sale    @relation(fields: [saleId], references: [id])
   product        Product @relation(fields: [productId], references: [id])
 
@@ -231,4 +234,38 @@ model PurchaseOrderLine {
 
   @@unique([purchaseOrderId, productId])
   @@index([productId])
+}
+
+
+// Append-only local cash return record. Original sales/receipt remain unchanged.
+model SaleReturn {
+  id                String           @id @default(cuid())
+  requestId         String           @unique
+  returnNumber      String           @unique
+  saleId            String
+  sale              Sale             @relation(fields: [saleId], references: [id])
+  shiftId           String
+  approvedById      String
+  reason            String
+  refundCents       Int
+  createdAt         DateTime         @default(now())
+  lines             SaleReturnLine[]
+
+  @@index([saleId, createdAt])
+  @@index([createdAt])
+}
+
+model SaleReturnLine {
+  id                String           @id @default(cuid())
+  returnId          String
+  saleReturn        SaleReturn       @relation(fields: [returnId], references: [id])
+  saleItemId        String
+  saleItem          SaleItem         @relation(fields: [saleItemId], references: [id])
+  quantity          Int
+  unitPriceCents    Int
+  refundCents       Int
+  restocked         Boolean
+
+  @@index([returnId])
+  @@index([saleItemId])
 }
