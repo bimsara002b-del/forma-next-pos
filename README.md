@@ -74,3 +74,22 @@ To test in private Codespaces, protect/backup the local SQLite database, pull th
 A local REG-01 register can open and close a shift, record cash in/out with unique request IDs and reconcile counted against expected cash. Checkout sales are attributed atomically to any open shift. Existing demo sales continue without a shift unless POS_REQUIRE_OPEN_SHIFT=true is set in the private root .env; in that strict mode, new cash sales require an open shift. Retry of an already committed cash checkout is allowed to resolve even after shift close. This is a one-register local pilot, not audited X/Z reporting or a multi-tenant branch register. No card processing, refunds or denomination tracking.
 
 For local testing, back up your isolated SQLite demo database first, generate the Prisma client and apply the additive schema only to that demo (npm run db:generate; npm run db:push). Do not run db:push on any production database. Open the Cash Shifts navigation tab, open a shift, make a cash sale, then close with counted cash. Verify that the receipt is attributed to the shift and stock remains correct. Keep Codespaces ports Private.
+
+
+## Milestone 06 — Separate local Super Admin identity
+
+The platform `SUPER_ADMIN` role is not store `OWNER`. Super Admin authenticates with its own password via staff login and is directed to protected `/super-admin`. Local staff account counts are shown; full multi-tenant SaaS administration is NOT implemented. Store owners cannot create the `SUPER_ADMIN` role or manage this account via the staff API. Store checkout, stock and sales permissions do not apply to Super Admin.
+
+**Private Codespaces/local pilot only.** Back up your SQLite demo database first. From the repository root:
+
+```bash
+npm install
+npm run setup
+npm run db:generate
+npm run db:push
+npm run superadmin:bootstrap
+```
+
+The bootstrap creates username `superadmin` and prints a random **one-time password** only in your private terminal. Save it privately: the database stores only a salted scrypt hash. Set `POS_STAFF_AUTH_ENABLED=true` in gitignored `.env`, restart `npm run dev`, and sign in at `/login`. To rotate an existing Super Admin password and invalidate sessions: `npm run superadmin:reset-password`. Normal bootstrapping does not change an existing account.
+
+Do not commit `.env` or passwords, or expose Codespaces ports publicly. This is not production-ready: SaaS tenants, subscription billing, MFA, and platform-wide security controls are future work.

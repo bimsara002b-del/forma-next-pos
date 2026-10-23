@@ -31,7 +31,7 @@ export async function GET() {
   const actor = await ownerOnly();
   if (denied(actor)) return actor;
   const [users, events] = await Promise.all([
-    prisma.staffUser.findMany({ orderBy: { createdAt: "asc" }, select: staffPublicSelect }),
+    prisma.staffUser.findMany({ where: { role: { not: "SUPER_ADMIN" } }, orderBy: { createdAt: "asc" }, select: staffPublicSelect }),
     prisma.staffAuditEvent.findMany({
       take: 20, orderBy: { createdAt: "desc" },
       select: { id: true, actorId: true, targetId: true, action: true, createdAt: true }

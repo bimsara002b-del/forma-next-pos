@@ -19,6 +19,7 @@ const input = z.discriminatedUnion("action", [openInput, closeInput, movementInp
 export async function GET() {
   const actor = await getActor();
   if (!actor) return Response.json({ error: "Sign in required." }, { status: 401 });
+  if (actor.role === "SUPER_ADMIN") return Response.json({ error: "Store role required." }, { status: 403 });
   try {
     return Response.json(await shiftOverview(prisma), { headers: { "Cache-Control": "no-store" } });
   } catch {
@@ -28,6 +29,7 @@ export async function GET() {
 export async function POST(request: Request) {
   const actor = await getActor();
   if (!actor) return Response.json({ error: "Sign in required." }, { status: 401 });
+  if (actor.role === "SUPER_ADMIN") return Response.json({ error: "Store role required." }, { status: 403 });
   const originError = mutationAuthError(request);
   if (originError) return originError;
   let body: unknown;

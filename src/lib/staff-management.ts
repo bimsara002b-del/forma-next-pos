@@ -34,6 +34,7 @@ export async function changeStaffAccount(db: PrismaClient, actorId: string, acti
       throw new StaffManagementError("NOT_AUTHORIZED");
     const target = await tx.staffUser.findUnique({ where: { id: action.targetId } });
     if (!target) throw new StaffManagementError("ACCOUNT_NOT_FOUND");
+    if (target.role === "SUPER_ADMIN") throw new StaffManagementError("NOT_AUTHORIZED");
     if (action.type !== "reset_password" &&
       target.isActive === (action.type === "activate")) throw new StaffManagementError("NO_CHANGE");
 
