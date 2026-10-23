@@ -80,3 +80,25 @@ model StaffUser {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 }
+
+
+// Local pilot: persisted failed sign-in count keyed by HMAC, not plaintext username.
+model LoginThrottle {
+  key          String    @id
+  attempts     Int       @default(0)
+  windowEndsAt DateTime
+  lockedUntil  DateTime?
+  updatedAt    DateTime  @updatedAt
+}
+
+// Local owner account lifecycle audit (no passwords or secret tokens stored).
+model StaffAuditEvent {
+  id        String   @id @default(cuid())
+  actorId   String
+  targetId  String
+  action    String
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([targetId, createdAt])
+}
