@@ -2,7 +2,7 @@
 
 import { FormEvent, useMemo, useState } from "react";
 import { barcodeSvg, barcodeValue, MAX_BATCH_LABELS, MAX_BATCH_PRODUCTS,
-  renderLabelSheet, validateLabelBatch, type LabelOptions, type LabelPaper, type LabelProduct } from "@/lib/barcode-label-sheet";
+  renderLabelSheet, validateLabelBatch, type LabelOptions, type LabelPaper, type LabelProduct, type PrinterProfile } from "@/lib/barcode-label-sheet";
 
 type QueueLine = { productId: string; copies: number };
 function printDocument(html: string) {
@@ -14,7 +14,7 @@ function printDocument(html: string) {
   popup.document.close();
 }
 
-export function BulkBarcodeLabels({ products }: { products: LabelProduct[] }) {
+export function BulkBarcodeLabels({ products, profile }: { products: LabelProduct[]; profile: PrinterProfile }) {
   const [search, setSearch] = useState("");
   const [choice, setChoice] = useState("");
   const [queue, setQueue] = useState<QueueLine[]>([]);
@@ -55,7 +55,7 @@ export function BulkBarcodeLabels({ products }: { products: LabelProduct[] }) {
   function print(e: FormEvent<HTMLFormElement>) {
     e.preventDefault(); setError(""); setNotice("");
     try {
-      const html = renderLabelSheet(lines, paper, options);
+      const html = renderLabelSheet(lines, paper, options, profile);
       printDocument(html);
       setNotice("Print preview opened for " + total + " labels. Select the matching paper and 100% scale.");
     } catch (e) { setError(e instanceof Error ? e.message : "Could not prepare label print."); }
