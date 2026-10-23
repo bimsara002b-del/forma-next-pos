@@ -1,11 +1,10 @@
 "use client";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import {
   Activity, ArrowRight, Barcode, Boxes, CheckCircle2, CircleAlert, CreditCard,
   LayoutDashboard, LogOut, Minus, Package, Plus, Printer, ReceiptText, RefreshCcw,
-  Search, ShoppingBasket, ShoppingCart, Trash2, TrendingUp, Users, X
+  Search, ShoppingBasket, ShoppingCart, Trash2, TrendingUp, X
 } from "lucide-react";
 import { formatMoney, parseMoney } from "@/lib/money";
 
@@ -32,7 +31,7 @@ async function readJson<T>(response: Response): Promise<T> {
   return result as T;
 }
 
-export function PosWorkspace({canManageStaff=false,canManageInventory=true}:{canManageStaff?:boolean;canManageInventory?:boolean}) {
+export function PosWorkspace() {
   const router = useRouter();
   const [view, setView] = useState<View>("pos");
   const [products, setProducts] = useState<Product[]>([]);
@@ -205,7 +204,7 @@ export function PosWorkspace({canManageStaff=false,canManageInventory=true}:{can
   const navigation: { key: View; title: string; icon: typeof ShoppingCart }[] = [
     { key: "pos", title: "Point of Sale", icon: ShoppingCart },
     { key: "dashboard", title: "Dashboard", icon: LayoutDashboard },
-    ...(canManageInventory ? [{ key: "inventory" as View, title: "Inventory", icon: Boxes }] : []),
+    { key: "inventory", title: "Inventory", icon: Boxes },
     { key: "sales", title: "Sales History", icon: ReceiptText }
   ];
   return <div className="app-shell">
@@ -216,7 +215,6 @@ export function PosWorkspace({canManageStaff=false,canManageInventory=true}:{can
         {navigation.map(entry => <button type="button" key={entry.key} className={"nav-button" + (entry.key === view ? " active" : "")} onClick={() => setView(entry.key)}>
           <entry.icon size={19} strokeWidth={1.8}/><span>{entry.title}</span>{entry.key === "pos" && <small>F4</small>}
         </button>)}
-        {canManageStaff && <Link className="nav-button" href="/staff"><Users size={19}/><span>Staff Accounts</span></Link>}
       </nav>
       <div className="sidebar-foot"><div className="store-avatar">F</div><div className="sidebar-store"><strong>Forma Demo Store</strong><small>Local register 01</small></div>
         <button title="Sign out" aria-label="Sign out" onClick={() => void logout()}><LogOut size={18}/></button></div>

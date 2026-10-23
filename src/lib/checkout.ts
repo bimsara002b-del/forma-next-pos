@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { sumLines } from "./money";
+import { DEMO_REGISTER_ID } from "./shifts";
 
 export type CheckoutInput = {
   requestId: string;
@@ -11,7 +12,7 @@ type StoredSale = Prisma.SaleGetPayload<{ include: { items: true } }>;
 
 export class CheckoutFailure extends Error {
   constructor(public readonly code: "QUANTITY_LIMIT" | "PAYMENT_SHORT" | "PRODUCT_UNAVAILABLE" |
-    "STOCK_CHANGED" | "TOTAL_EXCEEDED" | "REQUEST_CONFLICT" | "RETRY_LATER") {
+    "STOCK_CHANGED" | "TOTAL_EXCEEDED" | "REQUEST_CONFLICT" | "RETRY_LATER" | "SHIFT_REQUIRED") {
     super(code);
     this.name = "CheckoutFailure";
   }
@@ -73,6 +74,14 @@ export async function commitCashCheckout(db: PrismaClient, input: CheckoutInput)
       });
       if (existing) return resolveExisting(existing);
 
+      const register = await tx.cashRegister.findUnique({ where: { id: DEMO_REGISTER_ID } });
+      const openShift = register?.activeShiftId
+        ? await tx.cashShift.findUnique({ where: { id: register.activeShiftId } })
+        : null;
+      if (process.env.POS_REQUIRE_OPEN_SHIFT === "true" && (!openShift || openShift.status !== "OPEN")) {
+        throw new CheckoutFailure("SHIFT_REQUIRED");
+      }
+      const shiftId = openShift?.status === "OPEN" ? openShift.id : null;
       const products = await tx.product.findMany({
         where: { id: { in: [...quantities.keys()] }, isActive: true }
       });
@@ -116,6 +125,7 @@ export async function commitCashCheckout(db: PrismaClient, input: CheckoutInput)
           receivedCents: input.receivedCents,
           changeCents: input.receivedCents - totalCents,
           paymentMethod: "CASH",
+          shiftId,
           items: { create: lines }
         },
         include: { items: true }
