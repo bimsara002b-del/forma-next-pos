@@ -32,3 +32,21 @@ export function resolveCheckoutScan(
   if (reserved >= product.stockQty) return { status: "stock-limit", code };
   return { status: "matched", productId: product.id, name: product.name };
 }
+
+/** Apply each scanner event to the latest cart, never a stale rendered cart. */
+export function addOneToCheckoutCart(cart:CheckoutScanCartLine[],product:CheckoutScanProduct){
+ const previous=cart.find(x=>x.productId===product.id);
+ if(!Number.isSafeInteger(product.stockQty)||product.stockQty<1||(previous?.quantity??0)>=product.stockQty)
+   return {cart,added:false};
+ return {added:true,cart:previous?cart.map(x=>x.productId===product.id?{...x,quantity:x.quantity+1}:x):
+   [...cart,{productId:product.id,quantity:1}]};
+}
+export function applyCheckoutScan(raw:string,products:CheckoutScanProduct[],cart:CheckoutScanCartLine[]){
+ const result=resolveCheckoutScan(raw,products,cart);
+ if(result.status!=="matched")return {cart,result};
+ const item=products.find(p=>p.id===result.productId);
+ if(!item)return {cart,result:{status:"unknown" as const,code:raw}};
+ const updated=addOneToCheckoutCart(cart,item);
+ return updated.added?{cart:updated.cart,result}:
+   {cart,result:{status:"stock-limit" as const,code:raw}};
+}

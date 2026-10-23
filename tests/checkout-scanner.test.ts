@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveCheckoutScan } from "../src/lib/checkout-scanner";
+import { resolveCheckoutScan,applyCheckoutScan,addOneToCheckoutCart } from "../src/lib/checkout-scanner";
 const catalog = [
   { id: "a", name: "Milk", sku: "MILK-1", barcode: "001234", stockQty: 3 },
   { id: "b", name: "Tea", sku: "TEA-2", barcode: null, stockQty: 2 },
@@ -37,4 +37,32 @@ describe("safe POS checkout barcode scans", () => {
     expect(resolveCheckoutScan("a".repeat(81), catalog, []).status).toBe("invalid");
     expect(resolveCheckoutScan(" 001234", catalog, []).status).toBe("unknown");
   });
+});
+
+describe("rapid scanning cannot overrun loaded stock",()=>{
+ it("commits 3 back-to-back scans and rejects the fourth",()=>{
+  let cart:{productId:string;quantity:number}[]=[];
+  for(let i=1;i<=3;i++){
+   const next=applyCheckoutScan("001234",catalog,cart);
+   expect(next.result.status).toBe("matched");
+   cart=next.cart;
+   expect(cart).toEqual([{productId:"a",quantity:i}]);
+  }
+  const blocked=applyCheckoutScan("001234",catalog,cart);
+  expect(blocked.result.status).toBe("stock-limit");
+  expect(blocked.cart).toBe(cart);
+ });
+ it("never changes the cart on unknown or ambiguous scans",()=>{
+  const cart=[{productId:"a",quantity:1}];
+  expect(applyCheckoutScan("MIL",catalog,cart).cart).toBe(cart);
+  const duplicate=[...catalog,{id:"d",name:"Dup",sku:"001234",barcode:null,stockQty:5}];
+  expect(applyCheckoutScan("001234",duplicate,cart).result.status).toBe("ambiguous");
+  expect(applyCheckoutScan("001234",duplicate,cart).cart).toBe(cart);
+ });
+ it("product card addition respects loaded stock cap",()=>{
+  let cart:{productId:string;quantity:number}[]=[];
+  for(let i=0;i<3;i++)cart=addOneToCheckoutCart(cart,catalog[0]).cart;
+  expect(addOneToCheckoutCart(cart,catalog[0])).toEqual({cart,added:false});
+  expect(addOneToCheckoutCart(cart,catalog[2]).added).toBe(false);
+ });
 });
