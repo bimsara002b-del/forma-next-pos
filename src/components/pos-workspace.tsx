@@ -2,6 +2,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { AdvancedInventory } from "./advanced-inventory";
 import {
   Activity, ArrowRight, Barcode, Boxes, CheckCircle2, CircleAlert, CreditCard,
   LayoutDashboard, LogOut, Minus, Package, Plus, Printer, ReceiptText, RefreshCcw,
@@ -295,7 +296,7 @@ export function PosWorkspace({canManageStaff=false,canManageInventory=true}:{can
             </tr>)}</tbody></table></div>
           {!products.length && <div className="table-empty">No products yet. Add a product to begin.</div>}
         </div>
-        <p className="small-disclaimer">Stock actions are recorded in a database movement ledger. Full purchasing, roles and approvals are planned for a later release.</p>
+        <AdvancedInventory onUpdated={refresh}/>
       </div>}
       {view === "shifts" && <div className="content-scroll"><CashShiftPanel /></div>}
       {view === "sales" && <div className="content-scroll">
