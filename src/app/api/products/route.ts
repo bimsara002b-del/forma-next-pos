@@ -14,7 +14,13 @@ const schema = z.object({
 
 export async function GET() {
   const denied=await permissionError("catalog.read"); if(denied)return denied;
-  const products = await prisma.product.findMany({ where: { isActive: true }, orderBy: { name: "asc" } });
+  // Cashiers can read this endpoint. Cost belongs only to stock.manage APIs.
+  // Explicit selection also prevents future private product fields leaking.
+  const products = await prisma.product.findMany({
+    where: { isActive: true }, orderBy: { name: "asc" },
+    select: { id: true, sku: true, barcode: true, name: true, category: true,
+      priceCents: true, stockQty: true, minStockQty: true, isActive: true }
+  });
   return Response.json({ products }, { headers: { "Cache-Control": "no-store" } });
 }
 export async function POST(request: Request) {
