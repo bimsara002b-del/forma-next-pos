@@ -44,7 +44,7 @@ export async function generateReports(db: PrismaClient, window: ReportingWindow)
   const knownCostLineWhere = { ...lineWhere, lineCostCents: { not: null } };
   const [
     saleTotals, itemTotals, knownCostTotals, knownCostLineCount,
-    topProducts, dailySalesLimited, products, closingShifts
+    topProducts, dailySalesLimited, products, closingShifts, refunded
   ] = await Promise.all([
     db.sale.aggregate({ where, _count: { _all: true }, _sum: { totalCents: true } }),
     db.saleItem.aggregate({ where: lineWhere, _count: { _all: true }, _sum: { quantity: true } }),
@@ -66,6 +66,10 @@ export async function generateReports(db: PrismaClient, window: ReportingWindow)
     db.cashShift.aggregate({
       where: { status: "CLOSED", closedAt: { gte: window.from, lt: window.toExclusive } },
       _count: { _all: true }, _sum: { varianceCents: true }
+    }),
+    db.saleReturn.aggregate({
+      where: { createdAt: { gte: window.from, lt: window.toExclusive } },
+      _count: { _all: true }, _sum: { refundCents: true }
     })
   ]);
 
@@ -102,6 +106,12 @@ export async function generateReports(db: PrismaClient, window: ReportingWindow)
     },
     inventory: { ...inventory, activeProductCount: products.length,
       valuationMethod: "Current stock × current known unit cost, not historical FIFO." },
+    refunds: {
+      count: refunded._count._all,
+      amountCents: refunded._sum.refundCents ?? 0,
+      netCashRevenueCents: (saleTotals._sum.totalCents ?? 0) - (refunded._sum.refundCents ?? 0),
+      note: "Refunds grouped by refund date; gross sales grouped by sale date. Coverage-specific gross profit does not subtract refund cost/revenue."
+    },
     closedShifts: {
       count: closingShifts._count._all,
       netCashVarianceCents: closingShifts._sum.varianceCents ?? 0
