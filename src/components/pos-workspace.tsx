@@ -1,14 +1,15 @@
 "use client";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   Activity, ArrowRight, Barcode, Boxes, CheckCircle2, CircleAlert, CreditCard,
   LayoutDashboard, LogOut, Minus, Package, Plus, Printer, ReceiptText, RefreshCcw,
-  Search, ShoppingBasket, ShoppingCart, Trash2, TrendingUp, X
+  Search, ShoppingBasket, ShoppingCart, Trash2, TrendingUp, Users, Wallet, X
 } from "lucide-react";
 import { formatMoney, parseMoney } from "@/lib/money";
 
-type View = "pos" | "dashboard" | "inventory" | "sales";
+type View = "pos" | "dashboard" | "inventory" | "sales" | "shifts";
 type Product = {
   id: string; sku: string; barcode: string | null; name: string; category: string;
   priceCents: number; costCents: number; stockQty: number; minStockQty: number;
@@ -31,7 +32,7 @@ async function readJson<T>(response: Response): Promise<T> {
   return result as T;
 }
 
-export function PosWorkspace() {
+export function PosWorkspace({canManageStaff=false,canManageInventory=true}:{canManageStaff?:boolean;canManageInventory?:boolean}) {
   const router = useRouter();
   const [view, setView] = useState<View>("pos");
   const [products, setProducts] = useState<Product[]>([]);
@@ -204,8 +205,9 @@ export function PosWorkspace() {
   const navigation: { key: View; title: string; icon: typeof ShoppingCart }[] = [
     { key: "pos", title: "Point of Sale", icon: ShoppingCart },
     { key: "dashboard", title: "Dashboard", icon: LayoutDashboard },
-    { key: "inventory", title: "Inventory", icon: Boxes },
-    { key: "sales", title: "Sales History", icon: ReceiptText }
+    ...(canManageInventory ? [{ key: "inventory" as View, title: "Inventory", icon: Boxes }] : []),
+    { key: "sales", title: "Sales History", icon: ReceiptText },
+    { key: "shifts", title: "Cash Shifts", icon: Wallet }
   ];
   return <div className="app-shell">
     <aside className="sidebar">
@@ -215,6 +217,7 @@ export function PosWorkspace() {
         {navigation.map(entry => <button type="button" key={entry.key} className={"nav-button" + (entry.key === view ? " active" : "")} onClick={() => setView(entry.key)}>
           <entry.icon size={19} strokeWidth={1.8}/><span>{entry.title}</span>{entry.key === "pos" && <small>F4</small>}
         </button>)}
+        {canManageStaff && <Link className="nav-button" href="/staff"><Users size={19}/><span>Staff Accounts</span></Link>}
       </nav>
       <div className="sidebar-foot"><div className="store-avatar">F</div><div className="sidebar-store"><strong>Forma Demo Store</strong><small>Local register 01</small></div>
         <button title="Sign out" aria-label="Sign out" onClick={() => void logout()}><LogOut size={18}/></button></div>
@@ -222,7 +225,7 @@ export function PosWorkspace() {
     <main className="main-panel">
       <div className="page-topbar">
         <div><div className="eyebrow">SALES WORKSPACE <span>/</span> {view.toUpperCase()}</div>
-          <h1>{view === "pos" ? "Point of sale" : view === "dashboard" ? "Overview" : view === "inventory" ? "Inventory" : "Sales history"}</h1>
+          <h1>{view === "pos" ? "Point of sale" : view === "dashboard" ? "Overview" : view === "inventory" ? "Inventory" : view === "shifts" ? "Cash shifts" : "Sales history"}</h1>
         </div>
         <div className="topbar-meta"><span className="demo-badge"><i/> DEVELOPMENT DEMO</span>
           <button type="button" onClick={() => void refresh()} aria-label="Refresh data" title="Refresh data"><RefreshCcw size={17}/></button></div>
@@ -294,6 +297,7 @@ export function PosWorkspace() {
         </div>
         <p className="small-disclaimer">Stock actions are recorded in a database movement ledger. Full purchasing, roles and approvals are planned for a later release.</p>
       </div>}
+      {view === "shifts" && <div className="content-scroll"><CashShiftPanel /></div>}
       {view === "sales" && <div className="content-scroll">
         <div className="content-heading"><div><h2>Sales history</h2><p>Recent completed cash sales (newest first)</p></div><span className="subtle-pill">{sales.length} latest records</span></div>
         <div className="panel"><div className="panel-header"><h3>Recent receipts</h3><span className="subtle-pill">Cash only</span></div><SalesTable sales={sales}/></div>
@@ -352,4 +356,106 @@ function SalesTable({ sales }: { sales: SaleSummary[] }) {
     <tbody>{sales.map(sale => <tr key={sale.id}><td className="table-strong mono">{sale.receiptNumber}</td><td>{new Date(sale.createdAt).toLocaleString("en-LK")}</td>
       <td>{sale.lines}</td><td><span className="stock-pill">Cash</span></td><td className="table-strong align-right">{formatMoney(sale.totalCents)}</td></tr>)}</tbody></table>
     {!sales.length && <div className="table-empty">No recorded sales yet. Complete a sale at the POS to see it here.</div>}</div>;
+}
+
+
+type ShiftRow = {
+  id: string; status: string; openedByName: string; openedAt: string;
+  openingFloatCents: number; countedCashCents: number | null;
+  expectedCashCents: number | null; varianceCents: number | null;
+};
+type ShiftSummary = {
+  active: (ShiftRow & { salesCents: number; movementCents: number; expectedCashCents: number }) | null;
+  history: ShiftRow[];
+};
+function CashShiftPanel() {
+  const [snapshot, setSnapshot] = useState<ShiftSummary>({active:null,history:[]});
+  const [amount, setAmount] = useState("0.00");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [warning,setWarning] = useState("");
+  const [pendingRequestId, setPendingRequestId] = useState("");
+  useEffect(()=>{
+    let cancelled=false;
+    void fetch("/api/shifts",{cache:"no-store"}).then(r=>readJson<ShiftSummary>(r))
+      .then(data=>{if(!cancelled)setSnapshot(data);})
+      .catch(e=>{if(!cancelled)setWarning(e instanceof Error?e.message:"Could not load shifts.");});
+    return ()=>{cancelled=true;};
+  },[]);
+  async function reload() {
+    const data=await fetch("/api/shifts",{cache:"no-store"}).then(r=>readJson<ShiftSummary>(r));
+    setSnapshot(data);
+  }
+  async function execute(action:"open"|"close"|"CASH_IN"|"CASH_OUT"){
+    if(busy)return;
+    const cents=parseMoney(amount);
+    if(cents===null || (action==="CASH_IN"||action==="CASH_OUT")&&cents===0){
+      setWarning("Enter a valid cash amount.");return;
+    }
+    if(action==="close" && !window.confirm("Close this shift with counted cash "+formatMoney(cents)+"?"))return;
+    if((action==="CASH_IN"||action==="CASH_OUT") && note.trim().length<2){
+      setWarning("Enter a cash movement reason (at least 2 characters).");return;
+    }
+    setBusy(true);setWarning("");
+    const requestId=pendingRequestId || crypto.randomUUID();
+    if(action==="CASH_IN"||action==="CASH_OUT")setPendingRequestId(requestId);
+    try {
+      await fetch("/api/shifts",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(action==="open"?{action:"open",openingFloatCents:cents}:
+          action==="close"?{action:"close",countedCashCents:cents}:
+          {action:"movement",requestId,type:action,amountCents:cents,note:note.trim()})
+      }).then(r=>readJson(r));
+      setPendingRequestId("");setNote("");setAmount("0.00");
+      await reload();
+    } catch(e) {
+      setWarning((e instanceof Error?e.message:"Shift update not confirmed.")+
+        " Refresh and verify register status before creating another request.");
+    }finally{setBusy(false);}
+  }
+  return <>
+    <div className="content-heading"><div><h2>Cash register 01</h2>
+      <p>Local development register · cash movements and reconciliation</p></div>
+      <span className="subtle-pill">{snapshot.active?"Shift open":"No active shift"}</span></div>
+    <div className="stat-grid">
+      <Stat title="Opening float" value={formatMoney(snapshot.active?.openingFloatCents??0)} icon={Wallet} tone="green"/>
+      <Stat title="Cash sales" value={formatMoney(snapshot.active?.salesCents??0)} icon={TrendingUp} tone="blue"/>
+      <Stat title="Cash in / out" value={formatMoney(snapshot.active?.movementCents??0)} icon={Activity} tone="violet"/>
+      <Stat title="Expected drawer" value={formatMoney(snapshot.active?.expectedCashCents??0)} icon={ReceiptText} tone="amber"/>
+    </div>
+    <div className="panel" style={{padding:20,marginBottom:20}}>
+      <div className="panel-header" style={{padding:0,paddingBottom:18}}><h3>{snapshot.active?"Shift actions":"Open a new shift"}</h3></div>
+      <p style={{color:"#8390a1",fontSize:12,marginTop:16}}>{snapshot.active
+        ?"Started by "+snapshot.active.openedByName+" · "+new Date(snapshot.active.openedAt).toLocaleString("en-LK")
+        :"Enter opening float and start the register before taking cash sales."}</p>
+      <label className="field-label" htmlFor="shift-amount">{snapshot.active?"Cash amount / counted cash (LKR)":"Opening float (LKR)"}</label>
+      <input className="money-input" id="shift-amount" value={amount} disabled={busy||!!pendingRequestId}
+        onChange={e=>setAmount(e.target.value)} inputMode="decimal"/>
+      {snapshot.active && <><label className="field-label" htmlFor="shift-note">Cash-in / cash-out reason</label>
+        <input id="shift-note" className="money-input" style={{fontSize:13}} value={note}
+          disabled={busy||!!pendingRequestId} onChange={e=>setNote(e.target.value)} placeholder="e.g. Petty cash"/></>}
+      {warning && <p className="form-error" role="alert">{warning}</p>}
+      <div className="stock-actions" style={{gap:10,marginTop:18}}>
+        {!snapshot.active?<button disabled={busy} onClick={()=>void execute("open")}>Open shift</button>:
+          <>
+            <button disabled={busy} onClick={()=>void execute("CASH_IN")}>Cash in</button>
+            <button disabled={busy} onClick={()=>void execute("CASH_OUT")}>Cash out</button>
+            <button disabled={busy||!!pendingRequestId} onClick={()=>void execute("close")}>Close and reconcile</button>
+          </>}
+        <button type="button" disabled={busy} onClick={()=>void reload()}>Refresh</button>
+      </div>
+    </div>
+    <div className="panel"><div className="panel-header"><h3>Shift history</h3><span className="subtle-pill">Last 20 shifts</span></div>
+      <div className="table-scroll"><table><thead><tr><th>Started</th><th>Cashier</th><th>Status</th><th>Expected</th><th>Counted</th><th>Variance</th></tr></thead>
+        <tbody>{snapshot.history.map(shift=><tr key={shift.id}>
+          <td>{new Date(shift.openedAt).toLocaleString("en-LK")}</td><td>{shift.openedByName}</td>
+          <td>{shift.status}</td><td>{shift.expectedCashCents===null?"—":formatMoney(shift.expectedCashCents)}</td>
+          <td>{shift.countedCashCents===null?"—":formatMoney(shift.countedCashCents)}</td>
+          <td>{shift.varianceCents===null?"—":formatMoney(shift.varianceCents)}</td>
+        </tr>)}</tbody></table></div>
+    </div>
+    <p className="small-disclaimer" style={{marginTop:15}}>
+      Demo only: one register, cash payments only. Expected cash excludes sales before a shift was opened.
+      No refunds, denomination counts, over/short approvals or fiscal certification.
+    </p>
+  </>;
 }

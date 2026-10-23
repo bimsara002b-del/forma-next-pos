@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 
 export const DEMO_REGISTER_ID = "REG-01";
 const MAX_CENTS = 2_000_000_000;
@@ -54,7 +54,7 @@ export async function openCashShift(db: PrismaClient, actor: ShiftActor, floatCe
     throw error;
   }
 }
-async function getActiveRegister(tx: Parameters<Parameters<PrismaClient["$transaction"]>[0]>[0]) {
+async function getActiveRegister(tx: Prisma.TransactionClient) {
   // This helper deliberately operates inside the caller's transaction.
   const register = await tx.cashRegister.findUnique({ where: { id: DEMO_REGISTER_ID } });
   if (!register?.activeShiftId) throw new ShiftFailure("NO_OPEN_SHIFT");

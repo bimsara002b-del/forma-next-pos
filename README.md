@@ -60,3 +60,17 @@ Research and roadmap are maintained in the project Notion Blueprint (Forma Next 
 
 ## Optional staff login foundation (experimental)
 The current shared-password login remains the default. After backing up the local demo database, run npm run db:generate and npm run db:push. Run npm run staff:bootstrap to create username owner with the existing POS_ACCESS_PASSWORD. Add POS_STAFF_AUTH_ENABLED=true to your untracked .env and restart to enable staff login. Turn the flag back off to return to demo access. This experimental feature lacks login rate limiting, user management UI, password resets, MFA, multi-tenant separation and production hardening. Do not use it with real retail records.
+
+
+## Milestone 04 — Local Staff Management and Login Protection
+
+The opt-in staff login now has an owner-only Staff Management page at /staff. When staff mode is enabled, an OWNER can add users, temporarily disable or re-enable staff, and reset passwords. Such changes bump a session version and invalidate old signed staff sessions. A minimal account audit table records actor, target and action without passwords. A persistent per-username, local SQLite failed-login throttle delays sign-in after five failed attempts in 15 minutes. This is **not distributed/IP-scoped rate limiting** and is insufficient alone for public production deployment.
+
+To test in private Codespaces, protect/backup the local SQLite database, pull this branch and run npm run db:generate then npm run db:push, followed by npm run staff:bootstrap. Set POS_STAFF_AUTH_ENABLED=true in the local .env and restart the server. Sign in with username owner and the local password; open Staff Accounts from the sidebar. Do not share .env or use real merchant data. For production: proper migrations, distributed throttling, MFA, audit policy, tenancy and deployment hardening still required.
+
+
+## Milestone 05 — Cashier Shift and Single Cash Register Demo
+
+A local REG-01 register can open and close a shift, record cash in/out with unique request IDs and reconcile counted against expected cash. Checkout sales are attributed atomically to any open shift. Existing demo sales continue without a shift unless POS_REQUIRE_OPEN_SHIFT=true is set in the private root .env; in that strict mode, new cash sales require an open shift. Retry of an already committed cash checkout is allowed to resolve even after shift close. This is a one-register local pilot, not audited X/Z reporting or a multi-tenant branch register. No card processing, refunds or denomination tracking.
+
+For local testing, back up your isolated SQLite demo database first, generate the Prisma client and apply the additive schema only to that demo (npm run db:generate; npm run db:push). Do not run db:push on any production database. Open the Cash Shifts navigation tab, open a shift, make a cash sale, then close with counted cash. Verify that the receipt is attributed to the shift and stock remains correct. Keep Codespaces ports Private.
