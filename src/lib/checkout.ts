@@ -97,7 +97,9 @@ export async function commitCashCheckout(db: PrismaClient, input: CheckoutInput)
           productName: product.name,
           quantity,
           unitPriceCents: product.priceCents,
-          lineTotalCents: product.priceCents * quantity
+          lineTotalCents: product.priceCents * quantity,
+          unitCostCents: product.costCents > 0 ? product.costCents : null,
+          lineCostCents: product.costCents > 0 ? product.costCents * quantity : null
         };
       });
       let totalCents: number;
