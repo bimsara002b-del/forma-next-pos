@@ -184,3 +184,91 @@ export async function reconcileStockCount(db: PrismaClient, input: {
     return { product: await tx.product.findUniqueOrThrow({ where: { id: productId } }), delta };
   });
 }
+
+
+// Only manager/owner inventory adjustments call this audited, retry-safe service.
+// Receiving, sales, returns and physical counts retain their own workflows.
+export type AdjustmentInput = {
+  requestId: string; productId: string; expectedQty: number; delta: number;
+  reason: "FOUND" | "LOSS" | "DAMAGE" | "CORRECTION";
+  note: string; performedById: string;
+};
+export class StockAdjustmentFailure extends Error {
+  constructor(public readonly code: "INVALID_ADJUSTMENT" | "PRODUCT_UNAVAILABLE" |
+    "STOCK_CHANGED" | "REQUEST_CONFLICT" | "RETRY_LATER") {
+    super(code);
+    this.name = "StockAdjustmentFailure";
+  }
+}
+export function validateAdjustment(input: AdjustmentInput) {
+  if (!input.productId || !input.performedById ||
+    !Number.isSafeInteger(input.expectedQty) || input.expectedQty < 0 ||
+    input.expectedQty > 1_000_000 || !Number.isSafeInteger(input.delta) ||
+    input.delta === 0 || Math.abs(input.delta) > 100_000 ||
+    !["FOUND", "LOSS", "DAMAGE", "CORRECTION"].includes(input.reason) ||
+    (input.reason === "FOUND" && input.delta < 0) ||
+    (["LOSS", "DAMAGE"].includes(input.reason) && input.delta > 0) ||
+    input.note.trim() !== input.note || input.note.length < 4 || input.note.length > 160 ||
+    input.expectedQty + input.delta < 0 || input.expectedQty + input.delta > 1_000_000) {
+    throw new StockAdjustmentFailure("INVALID_ADJUSTMENT");
+  }
+}
+export async function adjustInventoryStock(db: PrismaClient, input: AdjustmentInput) {
+  validateAdjustment(input);
+  const exactReplay = (existing: {
+    productId: string; beforeQty: number | null; afterQty: number | null;
+    changeQty: number; reason: string; note: string | null; performedById: string | null;
+  }) => {
+    if (existing.productId !== input.productId || existing.beforeQty !== input.expectedQty ||
+      existing.afterQty !== input.expectedQty + input.delta ||
+      existing.changeQty !== input.delta || existing.reason !== "ADJUST_" + input.reason ||
+      existing.note !== input.note || existing.performedById !== input.performedById) {
+      throw new StockAdjustmentFailure("REQUEST_CONFLICT");
+    }
+  };
+  try {
+    return await db.$transaction(async tx => {
+      const prior = await tx.stockMovement.findUnique({ where: { requestId: input.requestId } });
+      if (prior) {
+        exactReplay(prior);
+        return { movement: prior, replay: true };
+      }
+      const product = await tx.product.findUnique({ where: { id: input.productId } });
+      if (!product?.isActive) throw new StockAdjustmentFailure("PRODUCT_UNAVAILABLE");
+      const updated = await tx.product.updateMany({
+        where: { id: input.productId, isActive: true, stockQty: input.expectedQty },
+        data: { stockQty: { increment: input.delta } }
+      });
+      if (updated.count !== 1) throw new StockAdjustmentFailure("STOCK_CHANGED");
+      const movement = await tx.stockMovement.create({
+        data: {
+          productId: input.productId,
+          changeQty: input.delta,
+          reason: "ADJUST_" + input.reason,
+          requestId: input.requestId,
+          beforeQty: input.expectedQty,
+          afterQty: input.expectedQty + input.delta,
+          performedById: input.performedById,
+          note: input.note,
+          reference: input.note
+        }
+      });
+      return { movement, replay: false };
+    }, { maxWait: 5000, timeout: 10000 });
+  } catch (error) {
+    if (error instanceof StockAdjustmentFailure) throw error;
+    if (isConflict(error)) {
+      try {
+        const prior = await db.stockMovement.findUnique({ where: { requestId: input.requestId } });
+        if (prior) {
+          exactReplay(prior);
+          return { movement: prior, replay: true };
+        }
+      } catch (lookupError) {
+        if (lookupError instanceof StockAdjustmentFailure) throw lookupError;
+      }
+      throw new StockAdjustmentFailure("RETRY_LATER");
+    }
+    throw error;
+  }
+}

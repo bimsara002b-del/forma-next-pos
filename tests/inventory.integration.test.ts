@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import { InventoryFailure, matchesReceipt, normalizeReceivingLines,
-  receiveInventory, reconcileStockCount } from "../src/lib/inventory";
+  receiveInventory, reconcileStockCount, adjustInventoryStock, StockAdjustmentFailure } from "../src/lib/inventory";
 
 const url = process.env.POS_INVENTORY_TEST_DATABASE_URL;
 const validTestUrl = url === "file:./inventory-integration.test.db";
@@ -135,6 +135,34 @@ describe("Advanced inventory isolated SQLite integration", () => {
     await expect(receiveInventory(db!,input)).rejects.toMatchObject({code:"ORDER_SUPPLIER_MISMATCH"});
     expect((await db!.product.findUniqueOrThrow({where:{id:p.id}})).stockQty).toBe(5);
     expect(await db!.inventoryReceipt.count()).toBe(0);
+    expect(await db!.stockMovement.count()).toBe(0);
+  });
+
+  test("audited adjustments record before/after and reject stale or duplicate requests",async()=>{
+    const p=await product(10);
+    const input={ requestId:randomUUID(),productId:p.id,expectedQty:10,delta:-3,
+      reason:"DAMAGE" as const,note:"Broken packages",performedById:"manager" };
+    const first=await adjustInventoryStock(db!,input);
+    expect(first.replay).toBe(false);
+    expect(first.movement).toMatchObject({
+      beforeQty:10,afterQty:7,changeQty:-3,reason:"ADJUST_DAMAGE",performedById:"manager"
+    });
+    const replay=await adjustInventoryStock(db!,input);
+    expect(replay.replay).toBe(true);
+    await expect(adjustInventoryStock(db!,{...input,delta:-2})).rejects.toMatchObject({code:"REQUEST_CONFLICT"});
+    await expect(adjustInventoryStock(db!,{...input,requestId:randomUUID()})).rejects.toMatchObject({code:"STOCK_CHANGED"});
+    expect((await db!.product.findUniqueOrThrow({where:{id:p.id}})).stockQty).toBe(7);
+    expect(await db!.stockMovement.count()).toBe(1);
+  });
+
+  test("stock adjustments reject negative stock, archived products and invalid directions",async()=>{
+    const p=await product(1);
+    const base={requestId:randomUUID(),productId:p.id,expectedQty:1,delta:-2,
+      reason:"LOSS" as const,note:"Inventory loss",performedById:"owner"};
+    await expect(adjustInventoryStock(db!,base)).rejects.toBeInstanceOf(StockAdjustmentFailure);
+    await expect(adjustInventoryStock(db!,{...base,delta:1})).rejects.toMatchObject({code:"INVALID_ADJUSTMENT"});
+    await db!.product.update({where:{id:p.id},data:{isActive:false}});
+    await expect(adjustInventoryStock(db!,{...base,delta:-1})).rejects.toMatchObject({code:"PRODUCT_UNAVAILABLE"});
     expect(await db!.stockMovement.count()).toBe(0);
   });
 
