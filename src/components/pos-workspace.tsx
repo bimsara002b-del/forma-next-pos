@@ -14,7 +14,7 @@ import { applyCheckoutScan, addOneToCheckoutCart } from "@/lib/checkout-scanner"
 type View = "pos" | "dashboard" | "inventory" | "sales" | "shifts";
 type Product = {
   id: string; sku: string; barcode: string | null; name: string; category: string;
-  priceCents: number; costCents: number; stockQty: number; minStockQty: number;
+  priceCents: number; stockQty: number; minStockQty: number;
 };
 type SaleSummary = { id: string; receiptNumber: string; totalCents: number; receivedCents: number;
   changeCents: number; createdAt: string; lines: number };
