@@ -128,3 +128,8 @@ Manager/Owner can print Code 128 barcode labels using the saved product barcode 
 ## Bulk Barcode Printing (Draft development)
 
 Manager or Owner can now queue up to 30 different active products and a combined maximum of 200 labels per print job, choosing 1–100 copies per product. Labels can be mixed on one 40×30/50×30 mm thermal print job or A4 grid of 48×30 mm labels. The browser print preview opens a separate page with a Print / Reprint button. Labels use a validated Code 128 of stored product barcode or SKU, and the job has no inventory side effects. Print at 100% scale, verify actual paper alignment and scanner readability before merchant use. Requires no schema changes.
+
+
+## POS keyboard-wedge barcode scanner checkout (Draft PR)
+
+The cashier catalog now separates **F2 Scan** (exact barcode or case-insensitive SKU + Enter) from **F3 Search** (fuzzy find; choose the product card). Scanning is never matched to a single fuzzy result: unknown/duplicate/out-of-stock codes cannot silently add the wrong product. The scan input is disabled during checkout/product dialogs or uncertain cash checkout; F4 opens checkout only from POS when idle, and function shortcuts ignore modifiers and auto-repeat. Quantity increases are limited by currently loaded stock and the existing server-authoritative checkout remains the final stock safety check. Leading zeroes are preserved. No global keyboard interception, raw HID access or DB changes; scanners need to act as a keyboard and append Enter or cashier can click Add. Browser/HID hardware QA is required before retail deployment.
