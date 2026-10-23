@@ -70,10 +70,9 @@ END
 $test$;
 DO $test$
 BEGIN
- IF (SELECT count(*) FROM (
-   UPDATE forma_saas.product SET price_minor = 1
-     WHERE id = 'bbbbbbbb-5555-5555-5555-555555555555' RETURNING id
- ) AS x) <> 0 THEN
+ UPDATE forma_saas.product SET price_minor = 1
+   WHERE id = 'bbbbbbbb-5555-5555-5555-555555555555';
+ IF FOUND THEN
    RAISE EXCEPTION 'FAIL: cross-tenant update affected rows';
  END IF;
 END
