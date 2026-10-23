@@ -74,3 +74,15 @@ To test in private Codespaces, protect/backup the local SQLite database, pull th
 A local REG-01 register can open and close a shift, record cash in/out with unique request IDs and reconcile counted against expected cash. Checkout sales are attributed atomically to any open shift. Existing demo sales continue without a shift unless POS_REQUIRE_OPEN_SHIFT=true is set in the private root .env; in that strict mode, new cash sales require an open shift. Retry of an already committed cash checkout is allowed to resolve even after shift close. This is a one-register local pilot, not audited X/Z reporting or a multi-tenant branch register. No card processing, refunds or denomination tracking.
 
 For local testing, back up your isolated SQLite demo database first, generate the Prisma client and apply the additive schema only to that demo (npm run db:generate; npm run db:push). Do not run db:push on any production database. Open the Cash Shifts navigation tab, open a shift, make a cash sale, then close with counted cash. Verify that the receipt is attributed to the shift and stock remains correct. Keep Codespaces ports Private.
+
+
+## Advanced Inventory UI and isolated integration tests (Milestone 06 follow-up)
+
+The Inventory view includes an advanced section where owner/manager can:
+- Edit SKU, barcode, product prices, cost and low-stock threshold without changing old sale lines.
+- Soft-archive or restore items while keeping past sale/movement records.
+- Receive several products against a supplier invoice; quantities and latest cost are applied transactionally. Retrying the same UUID and exact payload does not double-receive.
+- Reconcile a physical stock count only when the previously displayed stock still matches; a concurrent sale makes the count fail with a conflict.
+- Review receiving receipts and stock movement history.
+
+**Do not run in production.** For an isolated local demo, back up the SQLite file first, then run \`npm run db:generate\` and \`npm run db:push\` after reviewing schema changes. CI uses a separate \`inventory-integration.test.db\` file for receiving/count tests and does not touch user databases. Any uncertain receiving outcome must be retried with the same request ID and unchanged details. No suppliers/AP, purchase approvals, tax, exports or multi-tenant isolation are included.
