@@ -9,7 +9,7 @@ import {
   Search, ShoppingBasket, ShoppingCart, Trash2, TrendingUp, Users, Wallet, X
 } from "lucide-react";
 import { formatMoney, parseMoney } from "@/lib/money";
-import { resolveCheckoutScan } from "@/lib/checkout-scanner";
+import { applyCheckoutScan, addOneToCheckoutCart } from "@/lib/checkout-scanner";
 
 type View = "pos" | "dashboard" | "inventory" | "sales" | "shifts";
 type Product = {
@@ -55,6 +55,8 @@ export function PosWorkspace({canManageStaff=false,canManageInventory=true}:{can
   const searchInput = useRef<HTMLInputElement>(null);
   const scannerInput = useRef<HTMLInputElement>(null);
   const checkoutRequestId = useRef("");
+  const cartSnapshot = useRef<Cart[]>([]);
+  const commitCart = useCallback((next:Cart[])=>{cartSnapshot.current=next;setCart(next);},[]);
 
   const loadData = useCallback(async () => {
     const [catalog, overview] = await Promise.all([
@@ -108,33 +110,30 @@ export function PosWorkspace({canManageStaff=false,canManageInventory=true}:{can
   const totalCents = lines.reduce((sum, line) => sum + line.product.priceCents * line.quantity, 0);
   const itemCount = lines.reduce((sum, line) => sum + line.quantity, 0);
 
-  const addProductToCart = useCallback((product: Product) => {
-    setCart(previous => {
-      const current = previous.find(item => item.productId === product.id);
-      if ((current?.quantity ?? 0) >= product.stockQty) return previous;
-      return current
-        ? previous.map(item => item.productId === product.id ? { ...item, quantity: item.quantity + 1 } : item)
-        : [...previous, { productId: product.id, quantity: 1 }];
-    });
-  }, []);
-  const adjustCart = (id: string, delta: number) => setCart(previous => previous.flatMap(item => {
-    if (item.productId !== id) return [item];
-    const count = item.quantity + delta;
-    if (count <= 0) return [];
-    return [{ ...item, quantity: Math.min(count, byId.get(id)?.stockQty ?? 0) }];
-  }));
+  const addProductToCart=useCallback((product:Product)=>{
+    if(modal||busy||checkoutUncertain)return;
+    const updated=addOneToCheckoutCart(cartSnapshot.current,product);
+    if(updated.added)commitCart(updated.cart);
+  },[modal,busy,checkoutUncertain,commitCart]);
+  const adjustCart=(id:string,delta:number)=>{
+    if(modal||busy||checkoutUncertain)return;
+    commitCart(cartSnapshot.current.flatMap(item=>{
+      if(item.productId!==id)return [item];
+      const next=item.quantity+delta;
+      if(next<=0)return [];
+      return [{...item,quantity:Math.min(next,byId.get(id)?.stockQty??0)}];
+    }));
+  };
   const scan = (raw: string) => {
     if (modal || busy || checkoutUncertain || view !== "pos") {
       setNotice("Finish the current operation before scanning another item.");
       return;
     }
-    const result = resolveCheckoutScan(raw, products, cart);
-    if (result.status === "matched") {
-      const product = byId.get(result.productId);
-      if (product) {
-        addProductToCart(product);
-        setNotice(product.name + " added to the cart.");
-      }
+    const applied=applyCheckoutScan(raw,products,cartSnapshot.current);
+    const result=applied.result;
+    if(result.status==="matched"){
+      commitCart(applied.cart);
+      setNotice(result.name+" added to the cart.");
     } else {
       const messages: Record<Exclude<typeof result.status, "matched">, string> = {
         invalid: "Invalid barcode. Scan a printable barcode/SKU (up to 80 characters).",
@@ -147,10 +146,10 @@ export function PosWorkspace({canManageStaff=false,canManageInventory=true}:{can
     }
   };
   const openCheckout = useCallback(() => {
-    if (!cart.length) return;
+    if (!cartSnapshot.current.length || modal || busy || checkoutUncertain) return;
     if (!checkoutRequestId.current) checkoutRequestId.current = crypto.randomUUID();
     setReceived((totalCents / 100).toFixed(2)); setModal("checkout"); setNotice("");
-  }, [cart.length, totalCents]);
+  }, [totalCents,modal,busy,checkoutUncertain]);
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       // Function shortcuts must not hijack modifier shortcuts or an active modal.
@@ -166,7 +165,7 @@ export function PosWorkspace({canManageStaff=false,canManageInventory=true}:{can
       if (event.key === "F4" && !modal && !busy && !checkoutUncertain && view === "pos") {
         event.preventDefault(); openCheckout();
       }
-      if (event.key === "Escape" && modal && !busy && !checkoutUncertain) setModal(null);
+      if (event.key === "Escape" && modal && !busy && !checkoutUncertain) {if(modal==="checkout")checkoutRequestId.current="";setModal(null);}
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
@@ -181,11 +180,11 @@ export function PosWorkspace({canManageStaff=false,canManageInventory=true}:{can
     try {
       const data = await fetch("/api/checkout", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ requestId: checkoutRequestId.current, items: cart, receivedCents })
+        body: JSON.stringify({ requestId: checkoutRequestId.current, items: cartSnapshot.current, receivedCents })
       }).then(r => readJson<{ sale: Receipt }>(r));
       checkoutRequestId.current = "";
       setCheckoutUncertain(false);
-      setLastReceipt(data.sale); setModal(null); setCart([]);
+      setLastReceipt(data.sale); setModal(null); commitCart([]); setScannerCode("");
       setNotice("Cash sale " + data.sale.receiptNumber + " saved successfully.");
       await refresh();
     } catch (e) {
@@ -272,14 +271,14 @@ export function PosWorkspace({canManageStaff=false,canManageInventory=true}:{can
           </form>
           <div className="search-box"><Search size={19}/><input aria-label="Search by product, SKU or barcode" ref={searchInput} value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="F3 — Search by name, SKU or barcode, then select product" autoComplete="off" /></div>
+            placeholder="F3 — Search by name, SKU or barcode, then select product" autoComplete="off" disabled={!!modal || busy || checkoutUncertain} /></div>
           <div className="categories">{categories.map(name => <button key={name} className={category === name ? "selected" : ""} onClick={() => setCategory(name)}>{name}</button>)}</div>
           <div className="list-header"><strong>{category === "All" ? "All products" : category}</strong><span>{filtered.length} results</span></div>
           <div className="product-scroll">
             <div className="product-grid">{filtered.map(product => {
               const inCart = cart.find(c => c.productId === product.id)?.quantity ?? 0;
               const disabled = product.stockQty <= inCart;
-              return <button type="button" key={product.id} className="product-card" disabled={disabled} onClick={() => addProductToCart(product)}>
+              return <button type="button" key={product.id} className="product-card" disabled={disabled || !!modal || busy || checkoutUncertain} onClick={() => addProductToCart(product)}>
                 <span className="product-art"><Package size={28}/></span><span className="product-category">{product.category}</span>
                 <strong>{product.name}</strong><small>{product.sku}</small>
                 <div className="product-card-bottom"><span>{formatMoney(product.priceCents)}</span><span className="mini-plus"><Plus size={17}/></span></div>
@@ -291,18 +290,18 @@ export function PosWorkspace({canManageStaff=false,canManageInventory=true}:{can
         </section>
         <section className="cart-panel" aria-label="Current order">
           <div className="cart-header"><div className="cart-header-icon"><ShoppingBagIcon/></div><div><h2>Current order</h2><small>{itemCount} items in cart</small></div><span className="order-label">NEW SALE</span></div>
-          <div className="cart-title"><span>ORDER ITEMS</span><button type="button" onClick={() => setCart([])} disabled={!cart.length}><Trash2 size={13}/> Clear all</button></div>
+          <div className="cart-title"><span>ORDER ITEMS</span><button type="button" onClick={() => commitCart([])} disabled={!cart.length || !!modal || busy || checkoutUncertain}><Trash2 size={13}/> Clear all</button></div>
           <div className="cart-scroll">{lines.length ? lines.map(({ product, quantity }) => <div key={product.id} className="cart-line">
             <div className="cart-icon"><Package size={21}/></div><div className="cart-line-body">
               <div className="cart-line-top"><strong>{product.name}</strong><b>{formatMoney(product.priceCents * quantity)}</b></div>
               <small>{formatMoney(product.priceCents)} each</small>
-              <div className="qty-control"><button aria-label={"Decrease " + product.name} onClick={() => adjustCart(product.id, -1)}><Minus size={13}/></button>
-                <span>{quantity}</span><button aria-label={"Increase " + product.name} disabled={quantity >= product.stockQty} onClick={() => adjustCart(product.id, 1)}><Plus size={13}/></button></div>
+              <div className="qty-control"><button aria-label={"Decrease " + product.name} disabled={!!modal || busy || checkoutUncertain} onClick={() => adjustCart(product.id, -1)}><Minus size={13}/></button>
+                <span>{quantity}</span><button aria-label={"Increase " + product.name} disabled={quantity >= product.stockQty || !!modal || busy || checkoutUncertain} onClick={() => adjustCart(product.id, 1)}><Plus size={13}/></button></div>
             </div></div>) : <div className="empty-cart"><ShoppingCart size={38}/><strong>Cart is empty</strong><p>Select a product or scan a barcode to start a new sale.</p></div>}</div>
           <div className="cart-summary"><div className="sum-row"><span>Subtotal</span><strong>{formatMoney(totalCents)}</strong></div>
             <div className="sum-row subdued"><span>Tax / discounts</span><span>Not configured</span></div>
             <div className="sum-total"><span>Total due</span><strong>{formatMoney(totalCents)}</strong></div>
-            <button className="primary-action" disabled={cart.length === 0} onClick={openCheckout}><span>Checkout</span><strong>{formatMoney(totalCents)}</strong><ArrowRight size={18}/></button>
+            <button className="primary-action" disabled={cart.length === 0 || !!modal || busy || checkoutUncertain} onClick={openCheckout}><span>Checkout</span><strong>{formatMoney(totalCents)}</strong><ArrowRight size={18}/></button>
             <div className="shortcut-note">Press <kbd>F4</kbd> for checkout</div>
           </div>
         </section>
