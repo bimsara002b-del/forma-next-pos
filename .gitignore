@@ -12,3 +12,6 @@ prisma/migrations/.DS_Store
 *.tsbuildinfo
 coverage
 .vercel
+
+# Future Prisma 7 SaaS client is generated, never committed.
+src/generated/saas-prisma/
