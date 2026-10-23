@@ -9,6 +9,7 @@ import {
   Search, ShoppingBasket, ShoppingCart, Trash2, TrendingUp, Users, Wallet, X
 } from "lucide-react";
 import { formatMoney, parseMoney } from "@/lib/money";
+import { resolveCheckoutScan } from "@/lib/checkout-scanner";
 
 type View = "pos" | "dashboard" | "inventory" | "sales" | "shifts";
 type Product = {
@@ -41,6 +42,7 @@ export function PosWorkspace({canManageStaff=false,canManageInventory=true}:{can
   const [stats, setStats] = useState<Stats>({ productsCount: 0, lowStock: 0, salesCount: 0, revenueCents: 0 });
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [scannerCode, setScannerCode] = useState("");
   const [category, setCategory] = useState("All");
   const [cart, setCart] = useState<Cart[]>([]);
   const [modal, setModal] = useState<"checkout" | "product" | null>(null);
@@ -51,6 +53,7 @@ export function PosWorkspace({canManageStaff=false,canManageInventory=true}:{can
   const [lastReceipt, setLastReceipt] = useState<Receipt | null>(null);
   const [newProduct, setNewProduct] = useState<NewProduct>(emptyNew);
   const searchInput = useRef<HTMLInputElement>(null);
+  const scannerInput = useRef<HTMLInputElement>(null);
   const checkoutRequestId = useRef("");
 
   const loadData = useCallback(async () => {
@@ -120,13 +123,28 @@ export function PosWorkspace({canManageStaff=false,canManageInventory=true}:{can
     if (count <= 0) return [];
     return [{ ...item, quantity: Math.min(count, byId.get(id)?.stockQty ?? 0) }];
   }));
-  const scan = () => {
-    const query = search.trim();
-    const exact = products.find(p => p.barcode === query || p.sku.toLowerCase() === query.toLowerCase());
-    const candidate = exact ?? (filtered.length === 1 ? filtered[0] : null);
-    if (!candidate || candidate.stockQty <= 0) { setNotice("Product not found or out of stock."); return; }
-    addProductToCart(candidate);
-    setSearch(""); setNotice("");
+  const scan = (raw: string) => {
+    if (modal || busy || checkoutUncertain || view !== "pos") {
+      setNotice("Finish the current operation before scanning another item.");
+      return;
+    }
+    const result = resolveCheckoutScan(raw, products, cart);
+    if (result.status === "matched") {
+      const product = byId.get(result.productId);
+      if (product) {
+        addProductToCart(product);
+        setNotice(product.name + " added to the cart.");
+      }
+    } else {
+      const messages: Record<Exclude<typeof result.status, "matched">, string> = {
+        invalid: "Invalid barcode. Scan a printable barcode/SKU (up to 80 characters).",
+        unknown: "Barcode/SKU not found. Check the label or choose a product card.",
+        ambiguous: "This code matches multiple products. Correct duplicate SKU/barcode records.",
+        "out-of-stock": "Scanned product is out of stock.",
+        "stock-limit": "The entire available stock for this product is already in the cart."
+      };
+      setNotice(messages[result.status]);
+    }
   };
   const openCheckout = useCallback(() => {
     if (!cart.length) return;
@@ -135,8 +153,19 @@ export function PosWorkspace({canManageStaff=false,canManageInventory=true}:{can
   }, [cart.length, totalCents]);
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
-      if (event.key === "F2") { event.preventDefault(); setView("pos"); setTimeout(() => searchInput.current?.focus(), 0); }
-      if (event.key === "F4" && !modal && view === "pos") { event.preventDefault(); openCheckout(); }
+      // Function shortcuts must not hijack modifier shortcuts or an active modal.
+      if (event.altKey || event.ctrlKey || event.metaKey || event.repeat) return;
+      if (event.key === "F2" && !modal && !busy && !checkoutUncertain) {
+        event.preventDefault(); setView("pos");
+        setTimeout(() => scannerInput.current?.focus(), 0);
+      }
+      if (event.key === "F3" && !modal && !busy && !checkoutUncertain) {
+        event.preventDefault(); setView("pos");
+        setTimeout(() => searchInput.current?.focus(), 0);
+      }
+      if (event.key === "F4" && !modal && !busy && !checkoutUncertain && view === "pos") {
+        event.preventDefault(); openCheckout();
+      }
       if (event.key === "Escape" && modal && !busy && !checkoutUncertain) setModal(null);
     };
     window.addEventListener("keydown", handler);
@@ -225,10 +254,25 @@ export function PosWorkspace({canManageStaff=false,canManageInventory=true}:{can
       {notice && <div role="status" className="notification"><CircleAlert size={17}/><span>{notice}</span><button aria-label="Dismiss notification" onClick={() => setNotice("")}><X size={16}/></button></div>}
       {view === "pos" && <div className="pos-layout">
         <section className="catalog">
-          <div className="section-heading"><div><h2>Product catalog</h2><p>Find a product, or scan a barcode</p></div><span className="shortcut">F2 Search</span></div>
+          <div className="section-heading"><div><h2>Product catalog</h2><p>Scan an exact barcode or search and select a product</p></div><span className="shortcut">F2 Scan · F3 Search</span></div>
+          <form className="search-box" onSubmit={e => {
+            e.preventDefault();
+            scan(scannerCode);
+            setScannerCode("");
+            scannerInput.current?.focus();
+          }}>
+            <Barcode size={19}/>
+            <input aria-label="Scan barcode or SKU to add product" ref={scannerInput}
+              value={scannerCode} onChange={e => setScannerCode(e.target.value)}
+              placeholder="F2 — Scan barcode / SKU, then Enter" autoComplete="off" spellCheck={false}
+              disabled={!!modal || busy || checkoutUncertain}/>
+            <button type="submit" disabled={!scannerCode || !!modal || busy || checkoutUncertain} aria-label="Add scanned product">
+              <Plus size={17}/>
+            </button>
+          </form>
           <div className="search-box"><Search size={19}/><input aria-label="Search by product, SKU or barcode" ref={searchInput} value={search}
-            onChange={e => setSearch(e.target.value)} onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); scan(); } }}
-            placeholder="Search name, SKU or scan barcode…" autoComplete="off" /><Barcode size={19}/></div>
+            onChange={e => setSearch(e.target.value)}
+            placeholder="F3 — Search by name, SKU or barcode, then select product" autoComplete="off" /></div>
           <div className="categories">{categories.map(name => <button key={name} className={category === name ? "selected" : ""} onClick={() => setCategory(name)}>{name}</button>)}</div>
           <div className="list-header"><strong>{category === "All" ? "All products" : category}</strong><span>{filtered.length} results</span></div>
           <div className="product-scroll">
