@@ -45,7 +45,7 @@ export function ProcurementDashboard(){
     {message&&<p role="status" style={{color:"#148657"}}>{message}</p>}
     {error&&<p role="alert" className="form-error">{error}</p>}
     <div className="panel" style={{padding:20,marginBottom:20}}>
-      <h3>Low-stock alerts</h3><p className="small-disclaimer">Based on each product's reorder threshold. Suggestions are not orders.</p>
+      <h3>Low-stock alerts</h3><p className="small-disclaimer">Based on each product&apos;s reorder threshold. Suggestions are not orders.</p>
       <div className="table-scroll"><table><thead><tr><th>Product</th><th>On hand</th><th>Threshold</th><th>Suggested order</th></tr></thead>
         <tbody>{data.lowStock.map(p=><tr key={p.id}><td>{p.name}</td><td>{p.stockQty}</td><td>{p.minStockQty}</td><td>{p.recommendedQty}</td></tr>)}</tbody></table></div>
       {data.lowStockTruncated&&<p>Result capped; review larger catalogs separately.</p>}
