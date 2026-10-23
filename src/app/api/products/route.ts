@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { isAuthenticated, authError, mutationAuthError } from "@/lib/auth";
+import { permissionError, mutationAuthError } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 export const runtime = "nodejs";
 const schema = z.object({
@@ -13,12 +13,12 @@ const schema = z.object({
 }).strict();
 
 export async function GET() {
-  if (!await isAuthenticated()) return authError();
+  const denied=await permissionError("catalog.read"); if(denied)return denied;
   const products = await prisma.product.findMany({ where: { isActive: true }, orderBy: { name: "asc" } });
   return Response.json({ products }, { headers: { "Cache-Control": "no-store" } });
 }
 export async function POST(request: Request) {
-  if (!await isAuthenticated()) return authError();
+  const denied=await permissionError("catalog.create"); if(denied)return denied;
   const originError = mutationAuthError(request);
   if (originError) return originError;
   let data: unknown;

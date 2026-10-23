@@ -1,10 +1,10 @@
 import { z } from "zod";
-import { isAuthenticated, authError, mutationAuthError } from "@/lib/auth";
+import { permissionError, mutationAuthError } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 export const runtime = "nodejs";
 const schema = z.object({ productId: z.string().min(1), delta: z.number().int().min(-100_000).max(100_000).refine(v => v !== 0), reason: z.enum(["RECEIVING", "ADJUSTMENT"]) }).strict();
 export async function POST(request: Request) {
-  if (!await isAuthenticated()) return authError();
+  const denied=await permissionError("stock.manage"); if(denied)return denied;
   const originError = mutationAuthError(request);
   if (originError) return originError;
   let data: unknown;

@@ -1,5 +1,7 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
+import { prisma } from "./db";
+import { staffMode, isRole, hasPermission, verifyStaffSession, type Role, type Permission } from "./staff";
 import { sameOrigin } from "./origin";
 export const SESSION_COOKIE = "forma_pos_session";
 const TTL_SECONDS = 8 * 60 * 60;
@@ -30,9 +32,20 @@ export function verifySession(value: string | undefined): boolean {
   const expected = Buffer.from(signature(parts[0] + "." + parts[1]), "hex");
   return timingSafeEqual(Buffer.from(parts[2], "hex"), expected);
 }
-export async function isAuthenticated() {
-  const jar = await cookies();
-  return verifySession(jar.get(SESSION_COOKIE)?.value);
+export async function getActor(): Promise<{ id: string; role: Role; displayName: string } | null> {
+  const value = (await cookies()).get(SESSION_COOKIE)?.value;
+  if (!staffMode()) return verifySession(value) ? { id: "demo", role: "OWNER", displayName: "Demo Owner" } : null;
+  const token = verifyStaffSession(value, process.env.POS_SESSION_SECRET);
+  if (!token) return null;
+  const user = await prisma.staffUser.findUnique({where:{id:token.id}});
+  if (!user || !user.isActive || !isRole(user.role) || user.sessionVersion!==token.version) return null;
+  return {id:user.id,role:user.role,displayName:user.displayName};
+}
+export async function isAuthenticated() {return (await getActor())!==null;}
+export async function permissionError(permission: Permission): Promise<Response|null> {
+  const actor = await getActor();
+  if (!actor) return authError();
+  return hasPermission(actor.role,permission) ? null : Response.json({error:"Insufficient staff permissions."},{status:403});
 }
 export function authError() {
   return Response.json({ error: "Please sign in again." }, { status: 401 });

@@ -1,8 +1,8 @@
-import { authError, isAuthenticated } from "@/lib/auth";
+import { permissionError } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 export const runtime = "nodejs";
 export async function GET() {
-  if (!await isAuthenticated()) return authError();
+  const denied=await permissionError("overview.read"); if(denied)return denied;
   const [productsCount, lowStock, salesCount, totals, sales] = await Promise.all([
     prisma.product.count({ where: { isActive: true } }),
     prisma.product.count({ where: { isActive: true, stockQty: { lte: 5 } } }),

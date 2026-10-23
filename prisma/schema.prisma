@@ -66,3 +66,17 @@ model StockMovement {
 
   @@index([productId, createdAt])
 }
+
+
+// Local staff access pilot; not yet a multi-tenant SaaS identity model.
+model StaffUser {
+  id             String   @id @default(cuid())
+  username       String   @unique
+  displayName    String
+  passwordHash   String
+  role           String   @default("CASHIER")
+  isActive       Boolean  @default(true)
+  sessionVersion Int      @default(1)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
