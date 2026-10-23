@@ -37,8 +37,11 @@ model Sale {
   paymentMethod       String     @default("CASH")
   createdAt           DateTime   @default(now())
   items               SaleItem[]
+  shiftId             String?
+  shift               CashShift?  @relation(fields: [shiftId], references: [id])
 
   @@index([createdAt])
+  @@index([shiftId])
 }
 
 model SaleItem {
@@ -101,4 +104,50 @@ model StaffAuditEvent {
 
   @@index([createdAt])
   @@index([targetId, createdAt])
+}
+
+
+// Single physical/demo register (REG-01); no multi-tenant register access yet.
+model CashRegister {
+  id             String      @id
+  displayName    String
+  activeShiftId  String?
+  shifts         CashShift[]
+}
+
+// A shift can be closed only once. Financial values use integer cents.
+model CashShift {
+  id                String         @id @default(cuid())
+  registerId        String
+  register          CashRegister   @relation(fields: [registerId], references: [id])
+  status            String         @default("OPEN")
+  openedById        String
+  openedByName      String
+  closedById        String?
+  openingFloatCents Int
+  countedCashCents  Int?
+  expectedCashCents Int?
+  varianceCents     Int?
+  openedAt          DateTime       @default(now())
+  closedAt          DateTime?
+  sales             Sale[]
+  movements         CashMovement[]
+
+  @@index([registerId, openedAt])
+  @@index([status])
+}
+
+// Signed cash movement; requestId prevents duplicate cash-in/out on retries.
+model CashMovement {
+  id          String    @id @default(cuid())
+  requestId   String    @unique
+  shiftId     String
+  shift       CashShift @relation(fields: [shiftId], references: [id])
+  type        String
+  changeCents Int
+  recordedById String
+  note        String
+  createdAt   DateTime  @default(now())
+
+  @@index([shiftId, createdAt])
 }

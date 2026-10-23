@@ -48,6 +48,8 @@ export async function POST(request: Request) {
         case "PRODUCT_UNAVAILABLE":
         case "STOCK_CHANGED":
           return Response.json({ error: "Product or stock changed. Refresh and retry." }, { status: 409 });
+        case "SHIFT_REQUIRED":
+          return Response.json({ error: "Open a cash shift before completing a sale." }, { status: 409 });
         case "RETRY_LATER":
           return Response.json({ error: "Sale status uncertain. Retry with the same checkout ID and unchanged cart/tender." }, { status: 503 });
         case "PAYMENT_SHORT":
