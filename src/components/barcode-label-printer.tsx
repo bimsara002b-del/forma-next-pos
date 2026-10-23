@@ -1,17 +1,12 @@
 "use client";
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
-import { code128Bars,fitsLabel } from "@/lib/barcodes";
+import { fitsLabel } from "@/lib/barcodes";
 import { BulkBarcodeLabels } from "./bulk-barcode-labels";
 import { PrinterProfileSettings } from "./printer-profile-settings";
 import { DEFAULT_PRINTER_PROFILE, renderLabelSheet, type PrinterProfile } from "@/lib/barcode-label-sheet";
 type Product={id:string;name:string;sku:string;barcode:string|null;priceCents:number};
 type Size="40x30"|"50x30"|"A4";
-function escapeHtml(x:string){return x.replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#39;");}
-function svg(value:string){
- const {width,bars}=code128Bars(value);
- return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+width+' 60" preserveAspectRatio="none">'+bars.map(b=>'<rect x="'+b.x+'" width="'+b.width+'" y="0" height="60"/>').join("")+'</svg>';
-}
 export function BarcodeLabelPrinter(){
  const [products,setProducts]=useState<Product[]>([]);
  const [selected,setSelected]=useState("");
@@ -30,8 +25,8 @@ export function BarcodeLabelPrinter(){
  },[]);
  const product=products.find(p=>p.id===selected);
  const code=product?.barcode?.trim()||product?.sku.trim()||"";
- let bars="",valid=false;
- try{if(code){bars=svg(code);valid=fitsLabel(code,size==="A4"?48:size==="40x30"?40:50);}}catch{}
+ let valid=false;
+ try{if(code){valid=fitsLabel(code,size==="A4"?48:size==="40x30"?40:50);}}catch{}
  function print(e:FormEvent){
   e.preventDefault();setError("");
   if(!product||!valid||!Number.isInteger(copies)||copies<1||copies>100){setError("Choose a valid product, label size and 1–100 copies.");return;}
@@ -63,7 +58,7 @@ export function BarcodeLabelPrinter(){
    <h3>Preview</h3><div style={{padding:16,background:"#f1f5f9",borderRadius:10}}>
     <div style={{background:"#fff",color:"#000",padding:12,width:210,margin:"auto",textAlign:"center"}}>
      {name&&<strong style={{display:"block",fontSize:12}}>{product?.name}</strong>}
-     {bars&&<div style={{height:55}} dangerouslySetInnerHTML={{__html:bars}}/>}
+     {valid&&<div style={{height:55,fontSize:10}}>Code 128 preview available in print sheet</div>}
      {codeText&&<div style={{font:"11px monospace"}}>{code}</div>}
      {price&&<strong>{product?"Rs. "+(product.priceCents/100).toFixed(2):"—"}</strong>}
     </div>
