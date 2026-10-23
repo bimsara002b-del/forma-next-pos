@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { fitsLabel } from "@/lib/barcodes";
 import { BulkBarcodeLabels } from "./bulk-barcode-labels";
 import { PrinterProfileSettings } from "./printer-profile-settings";
+import { BarcodeLivePreview } from "./barcode-live-preview";
 import { DEFAULT_PRINTER_PROFILE, renderLabelSheet, type PrinterProfile } from "@/lib/barcode-label-sheet";
 type Product={id:string;name:string;sku:string;barcode:string|null;priceCents:number};
 type Size="40x30"|"50x30"|"A4";
@@ -55,14 +56,9 @@ export function BarcodeLabelPrinter(){
     <label><input type="checkbox" checked={price} onChange={e=>setPrice(e.target.checked)}/> Price</label>
     <label><input type="checkbox" checked={codeText} onChange={e=>setCodeText(e.target.checked)}/> Barcode text</label>
    </div>
-   <h3>Preview</h3><div style={{padding:16,background:"#f1f5f9",borderRadius:10}}>
-    <div style={{background:"#fff",color:"#000",padding:12,width:210,margin:"auto",textAlign:"center"}}>
-     {name&&<strong style={{display:"block",fontSize:12}}>{product?.name}</strong>}
-     {valid&&<div style={{height:55,fontSize:10}}>Code 128 preview available in print sheet</div>}
-     {codeText&&<div style={{font:"11px monospace"}}>{code}</div>}
-     {price&&<strong>{product?"Rs. "+(product.priceCents/100).toFixed(2):"—"}</strong>}
-    </div>
-   </div>
+   <h3>Live label preview</h3>
+   <BarcodeLivePreview product={product} paper={size} profile={profile}
+     options={{showName:name,showPrice:price,showCode:codeText}}/>
    {product&&!valid&&<p className="form-error">Barcode must be printable ASCII, up to 40 characters, and fit chosen label width.</p>}
    <button className="small-action" style={{marginTop:18}} disabled={!valid||!product}>Print barcode labels</button>
   </form></div>
