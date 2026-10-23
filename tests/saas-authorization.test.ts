@@ -64,4 +64,27 @@ describe("tenant authorization boundary (server-only contract)", () => {
     await expect(authorizeTenantScope(alice, { ...checkout, tenantId: TENANT_B }, store(owner)))
       .rejects.toMatchObject({ reason: "FORBIDDEN" });
   });
+  it.each(["branches.read", "inventory.read", "sales.read", "reports.read"] as const)(
+    "requires an assigned branch for manager %s", async capability => {
+      const manager = { ...assigned, role: "MANAGER" };
+      await expect(authorizeTenantScope(alice, { tenantId: TENANT_A, capability }, store(manager)))
+        .rejects.toMatchObject({ reason: "FORBIDDEN" });
+      await expect(authorizeTenantScope(alice, { tenantId: TENANT_A, branchId: "other", capability }, store(manager)))
+        .rejects.toMatchObject({ reason: "FORBIDDEN" });
+      await expect(authorizeTenantScope(alice, { tenantId: TENANT_A, branchId: "branch-a", capability }, store(manager)))
+        .resolves.toMatchObject({ branchId: "branch-a" });
+    }
+  );
+  it("allows owner aggregate reports within the verified tenant", async () => {
+    await expect(authorizeTenantScope(alice, { tenantId: TENANT_A, capability: "reports.read" },
+      store({ ...assigned, role: "OWNER" }))).resolves.toMatchObject({ tenantId: TENANT_A, branchId: null });
+  });
+  it("rejects inactive branches and a register belonging to another branch", async () => {
+    const inactive = store(assigned);
+    inactive.findBranch = async id => ({ id, tenantId: TENANT_A, isActive: false });
+    await expect(authorizeTenantScope(alice, checkout, inactive)).rejects.toBeInstanceOf(TenantAccessDenied);
+    const wrongBranch = store(assigned);
+    wrongBranch.findRegister = async id => ({ id, tenantId: TENANT_A, branchId: "other", isActive: true });
+    await expect(authorizeTenantScope(alice, checkout, wrongBranch)).rejects.toBeInstanceOf(TenantAccessDenied);
+  });
 });

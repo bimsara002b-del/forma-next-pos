@@ -96,3 +96,28 @@ test request forged IDs and pooled connection reuse against real PostgreSQL.
 F03-F06: migrate complete financial/inventory/purchase/refund models with
 strict tenant composite FKs, concurrency and idempotent copy, then staged
 rollout. Existing SQLite routes are NOT safely multi-tenant.
+
+## Review follow-up: branch isolation and verification
+
+The initial tenant-only keys allowed a sale to reference a register in a
+DIFFERENT branch of the SAME tenant, and a stock movement to reference a sale
+from another branch. The reviewed foundation uses tenant+branch+resource
+foreign keys for both relationships, mirrored in the Prisma target schema.
+SQL regressions cover both attacks plus valid sales and non-sale adjustments.
+
+Non-owner branch, inventory, sales and report reads now require an explicitly
+assigned branch. Owners may request tenant-wide reports. Tenant-wide product
+catalog reads remain allowed; catalog scope is distinct from branch stock.
+The future DAL must apply the returned verified branch on every such query.
+
+The disposable SQL suite now refuses any database not named forma_saas_ci,
+checks cross-tenant deletion/reassignment, A-to-B context switching and
+transaction-local context cleanup. Its deliberate financial rollback catches
+only its dedicated SQLSTATE; unrelated exceptions no longer pass silently.
+This is same-connection SQL verification, NOT a real application pool test.
+
+Remaining cutover blockers are unchanged: persisted assignments, verified
+identity/session resolver, full financial schema, Prisma 7 generation/adapter,
+restricted app role, all-route DAL integration, pooled connections, importer
+and restore drill. The migration here is an unshipped baseline for a NEW EMPTY
+database, not an upgrade script for any previously provisioned database.

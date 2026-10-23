@@ -66,6 +66,8 @@ const policy: Readonly<Record<TenantRole, readonly TenantCapability[]>> = {
   INVENTORY_CLERK: ["products.read", "products.write", "inventory.read", "inventory.adjust"]
 };
 const branchMandatory = new Set<TenantCapability>(["inventory.adjust", "checkout.create", "sales.refund.approve"]);
+// Non-owner reads must not turn missing branch selection into tenant-wide access.
+const branchScopedReads = new Set<TenantCapability>(["branches.read", "inventory.read", "sales.read", "reports.read"]);
 const isNonEmpty = (value: string | undefined): value is string =>
   typeof value === "string" && value.length > 0 && value.trim() === value;
 function isTenantRole(role: string): role is TenantRole {
@@ -96,6 +98,7 @@ export async function authorizeTenantScope(
       membership.status !== "ACTIVE" || !isTenantRole(membership.role)) forbidden();
   if (!policy[membership.role].includes(selection.capability)) forbidden();
   if (branchMandatory.has(selection.capability) && !selection.branchId) forbidden();
+  if (membership.role !== "OWNER" && branchScopedReads.has(selection.capability) && !selection.branchId) forbidden();
   if (selection.registerId && !selection.branchId) forbidden();
   if (selection.capability === "checkout.create" && !selection.registerId) forbidden();
 

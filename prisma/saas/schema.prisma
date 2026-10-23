@@ -94,6 +94,7 @@ model Register {
 
   @@unique([tenantId, id])
   @@unique([tenantId, branchId, code])
+  @@unique([tenantId, branchId, id])
   @@map("register")
   @@schema("forma_saas")
 }
@@ -130,7 +131,7 @@ model Sale {
   createdAt           DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   tenant              Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   branch              Branch           @relation(fields: [tenantId, branchId], references: [tenantId, id], onDelete: Restrict)
-  register            Register         @relation(fields: [tenantId, registerId], references: [tenantId, id], onDelete: Restrict)
+  register            Register         @relation(fields: [tenantId, branchId, registerId], references: [tenantId, branchId, id], onDelete: Restrict)
   cashier             TenantMembership @relation(fields: [tenantId, cashierMembershipId], references: [tenantId, id], onDelete: Restrict)
   lines               SaleLine[]
   movements           StockMovement[]
@@ -138,6 +139,7 @@ model Sale {
   @@unique([tenantId, id])
   @@unique([tenantId, requestId])
   @@unique([tenantId, receiptNumber])
+  @@unique([tenantId, branchId, id])
   @@index([tenantId, branchId, createdAt])
   @@map("sale")
   @@schema("forma_saas")
@@ -186,7 +188,7 @@ model StockMovement {
   tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   branch       Branch   @relation(fields: [tenantId, branchId], references: [tenantId, id], onDelete: Restrict)
   product      Product  @relation(fields: [tenantId, productId], references: [tenantId, id], onDelete: Restrict)
-  sale         Sale?    @relation(fields: [tenantId, saleId], references: [tenantId, id], onDelete: Restrict)
+  sale         Sale?    @relation(fields: [tenantId, branchId, saleId], references: [tenantId, branchId, id], onDelete: Restrict)
 
   @@index([tenantId, branchId, createdAt])
   @@index([tenantId, productId, createdAt])

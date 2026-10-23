@@ -47,6 +47,7 @@ CREATE TABLE forma_saas.register (
   is_active boolean NOT NULL DEFAULT true,
   UNIQUE (tenant_id, id),
   UNIQUE (tenant_id, branch_id, code),
+  UNIQUE (tenant_id, branch_id, id),
   FOREIGN KEY (tenant_id, branch_id) REFERENCES forma_saas.branch(tenant_id, id) ON DELETE RESTRICT
 );
 CREATE TABLE forma_saas.product (
@@ -74,8 +75,9 @@ CREATE TABLE forma_saas.sale (
   UNIQUE (tenant_id, id),
   UNIQUE (tenant_id, request_id),
   UNIQUE (tenant_id, receipt_number),
+  UNIQUE (tenant_id, branch_id, id),
   FOREIGN KEY (tenant_id, branch_id) REFERENCES forma_saas.branch(tenant_id, id) ON DELETE RESTRICT,
-  FOREIGN KEY (tenant_id, register_id) REFERENCES forma_saas.register(tenant_id, id) ON DELETE RESTRICT,
+  FOREIGN KEY (tenant_id, branch_id, register_id) REFERENCES forma_saas.register(tenant_id, branch_id, id) ON DELETE RESTRICT,
   FOREIGN KEY (tenant_id, cashier_membership_id)
     REFERENCES forma_saas.tenant_membership(tenant_id, id) ON DELETE RESTRICT
 );
@@ -112,7 +114,7 @@ CREATE TABLE forma_saas.stock_movement (
   created_at timestamptz NOT NULL DEFAULT now(),
   FOREIGN KEY (tenant_id, branch_id) REFERENCES forma_saas.branch(tenant_id, id) ON DELETE RESTRICT,
   FOREIGN KEY (tenant_id, product_id) REFERENCES forma_saas.product(tenant_id, id) ON DELETE RESTRICT,
-  FOREIGN KEY (tenant_id, sale_id) REFERENCES forma_saas.sale(tenant_id, id) ON DELETE RESTRICT
+  FOREIGN KEY (tenant_id, branch_id, sale_id) REFERENCES forma_saas.sale(tenant_id, branch_id, id) ON DELETE RESTRICT
 );
 CREATE INDEX movement_tenant_branch_time ON forma_saas.stock_movement (tenant_id, branch_id, created_at);
 CREATE INDEX movement_tenant_product_time ON forma_saas.stock_movement (tenant_id, product_id, created_at);
