@@ -22,6 +22,9 @@ describe("Advanced inventory isolated SQLite integration", () => {
   beforeEach(async () => {
     if (!db) return;
     await db.inventoryReceiptLine.deleteMany();
+    await db.purchaseOrderLine.deleteMany();
+    await db.purchaseOrder.deleteMany();
+    await db.supplier.deleteMany();
     await db.inventoryReceipt.deleteMany();
     await db.stockMovement.deleteMany();
     await db.saleItem.deleteMany();
@@ -87,6 +90,51 @@ describe("Advanced inventory isolated SQLite integration", () => {
     await expect(receiveInventory(db!, receipt([
       { productId: b.id, quantity: 2, unitCostCents: 200 }
     ]))).rejects.toMatchObject({ code: "INVALID_PRODUCT" });
+    expect(await db!.stockMovement.count()).toBe(0);
+  });
+
+
+  test("PO partial and final receiving updates PO counters, stock and ledger atomically",async()=>{
+    const p=await product(2);
+    const supplier=await db!.supplier.create({data:{name:"Supplier "+randomUUID()}});
+    const po=await db!.purchaseOrder.create({data:{
+      orderNumber:"PO-"+randomUUID(),supplierId:supplier.id,createdById:"owner",status:"ORDERED",
+      lines:{create:[{productId:p.id,quantityOrdered:10,unitCostCents:250}]}
+    }});
+    const payload={...receipt([{productId:p.id,quantity:4,unitCostCents:250}]),
+      supplierName:supplier.name,purchaseOrderId:po.id};
+    const first=await receiveInventory(db!,payload);
+    expect(first.replay).toBe(false);
+    expect((await db!.purchaseOrder.findUniqueOrThrow({where:{id:po.id}})).status).toBe("PARTIALLY_RECEIVED");
+    expect((await db!.purchaseOrderLine.findFirstOrThrow({where:{purchaseOrderId:po.id}})).quantityReceived).toBe(4);
+    const repeat=await receiveInventory(db!,payload);
+    expect(repeat.replay).toBe(true);
+    await expect(receiveInventory(db!,{...receipt([{productId:p.id,quantity:7,unitCostCents:250}]),
+      supplierName:supplier.name,purchaseOrderId:po.id})).rejects.toMatchObject({code:"ORDER_LINE_CONFLICT"});
+    expect((await db!.purchaseOrderLine.findFirstOrThrow({where:{purchaseOrderId:po.id}})).quantityReceived).toBe(4);
+    expect((await db!.product.findUniqueOrThrow({where:{id:p.id}})).stockQty).toBe(6);
+    const final=await receiveInventory(db!,{...receipt([{productId:p.id,quantity:6,unitCostCents:250}]),
+      supplierName:supplier.name,purchaseOrderId:po.id});
+    expect(final.replay).toBe(false);
+    expect((await db!.purchaseOrder.findUniqueOrThrow({where:{id:po.id}})).status).toBe("RECEIVED");
+    expect((await db!.purchaseOrderLine.findFirstOrThrow({where:{purchaseOrderId:po.id}})).quantityReceived).toBe(10);
+    expect((await db!.product.findUniqueOrThrow({where:{id:p.id}})).stockQty).toBe(12);
+    expect(await db!.stockMovement.count()).toBe(2);
+    expect((await db!.inventoryReceipt.findMany({where:{purchaseOrderId:po.id}}))).toHaveLength(2);
+  });
+  test("rejects supplier mismatch and draft order without receiving any stock",async()=>{
+    const p=await product(5);
+    const supplier=await db!.supplier.create({data:{name:"Supplier "+randomUUID()}});
+    const po=await db!.purchaseOrder.create({data:{
+      orderNumber:"PO-"+randomUUID(),supplierId:supplier.id,createdById:"owner",
+      lines:{create:[{productId:p.id,quantityOrdered:4,unitCostCents:200}]}
+    }});
+    const input={...receipt([{productId:p.id,quantity:2,unitCostCents:200}]),purchaseOrderId:po.id};
+    await expect(receiveInventory(db!,input)).rejects.toMatchObject({code:"ORDER_NOT_RECEIVABLE"});
+    await db!.purchaseOrder.update({where:{id:po.id},data:{status:"ORDERED"}});
+    await expect(receiveInventory(db!,input)).rejects.toMatchObject({code:"ORDER_SUPPLIER_MISMATCH"});
+    expect((await db!.product.findUniqueOrThrow({where:{id:p.id}})).stockQty).toBe(5);
+    expect(await db!.inventoryReceipt.count()).toBe(0);
     expect(await db!.stockMovement.count()).toBe(0);
   });
 
