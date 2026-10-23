@@ -118,3 +118,8 @@ The protected `/super-admin` page now has a responsive overview, local staff-acc
 Inventory management now includes searchable products by name, SKU, barcode and category; low/out/archived filters; filtered CSV export; and a manager/owner audited Stock In / Stock Out adjustment form. Stock adjustments require a UUID, expected stock quantity, incident reason and note. The API rejects conflicting old stock counts, out-of-range inventory and duplicate request IDs with altered contents; an identical retry does not apply stock twice. The quick +10 / -1 buttons have been retired because they lacked audit context.
 
 The StockMovement schema gained OPTIONAL audit fields for new adjustments, preserving previous ledger entries. Manual stock adjustments are for found, loss, damage and correction only; purchase order receiving, physical stock counts and refunds retain their dedicated workflows. Back up the isolated local SQLite demo database before applying the additive Prisma schema. **Never use db:push against live merchant databases or the older Laravel Forma POS databases.** Require CI and private Codespaces acceptance before merging.
+
+
+## Barcode Labels
+
+Manager/Owner can print Code 128 barcode labels using the saved product barcode or SKU. 40 × 30 mm and 50 × 30 mm thermal labels or 48 × 30 mm A4 sheet labels are supported, with 1–100 copies, optional product name, price and human-readable code. Browser print opens a separate print document and relies on an installed printer; no direct printer driver or stock changes. Use 100% scaling and verify scanner quality on real hardware. Only printable ASCII barcode values of up to 40 characters are supported.
