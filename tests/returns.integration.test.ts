@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
-import { postCashReturn, calculateRefund, matchesReturn } from "../src/lib/returns";
+import { postCashReturn, calculateRefund } from "../src/lib/returns";
 import { commitCashCheckout } from "../src/lib/checkout";
 import { openCashShift } from "../src/lib/shifts";
 const url=process.env.POS_RETURN_TEST_DATABASE_URL;
