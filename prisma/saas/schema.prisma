@@ -1,0 +1,197 @@
+/*
+ * Milestone 26 opt-in PostgreSQL / Prisma 7 target schema.
+ * NOT the default Prisma schema. Current Prisma 6 + SQLite POS stays untouched.
+ * The SQL migration contains explicit CHECKs and FORCE RLS not expressible
+ * in Prisma; do not replace/overwrite it with db push or migrate dev.
+ * No production datasource is configured in this branch.
+ */
+generator client {
+  provider = "prisma-client"
+  output   = "../../src/generated/saas-prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["forma_saas"]
+}
+
+model AppUser {
+  id              String             @id @default(uuid()) @db.Uuid
+  emailNormalized String             @unique @map("email_normalized")
+  status          String             @default("ACTIVE")
+  createdAt       DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  memberships     TenantMembership[]
+
+  @@map("app_user")
+  @@schema("forma_saas")
+}
+
+model Tenant {
+  id             String             @id @default(uuid()) @db.Uuid
+  slug           String             @unique
+  legalName      String             @map("legal_name")
+  timezone       String             @default("Asia/Colombo")
+  currencyCode   String             @default("LKR") @map("currency_code")
+  status         String             @default("TRIALING")
+  createdAt      DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  memberships    TenantMembership[]
+  branches       Branch[]
+  registers      Register[]
+  products       Product[]
+  sales          Sale[]
+  saleLines      SaleLine[]
+  stockBalances  StockBalance[]
+  stockMovements StockMovement[]
+
+  @@map("tenant")
+  @@schema("forma_saas")
+}
+
+model TenantMembership {
+  id                  String      @id @default(uuid()) @db.Uuid
+  tenantId            String      @map("tenant_id") @db.Uuid
+  userId              String      @map("user_id") @db.Uuid
+  role                String      @default("CASHIER")
+  status              String      @default("ACTIVE")
+  version             Int         @default(1)
+  tenant              Tenant      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  user                AppUser     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  cashierSales        Sale[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, userId])
+  @@map("tenant_membership")
+  @@schema("forma_saas")
+}
+
+model Branch {
+  id             String          @id @default(uuid()) @db.Uuid
+  tenantId       String          @map("tenant_id") @db.Uuid
+  code           String
+  name           String
+  isActive       Boolean         @default(true) @map("is_active")
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  registers      Register[]
+  sales          Sale[]
+  stockBalances  StockBalance[]
+  stockMovements StockMovement[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, code])
+  @@map("branch")
+  @@schema("forma_saas")
+}
+
+model Register {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  branchId  String   @map("branch_id") @db.Uuid
+  code      String
+  isActive  Boolean  @default(true) @map("is_active")
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  branch    Branch   @relation(fields: [tenantId, branchId], references: [tenantId, id], onDelete: Restrict)
+  sales     Sale[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, branchId, code])
+  @@unique([tenantId, branchId, id])
+  @@map("register")
+  @@schema("forma_saas")
+}
+
+model Product {
+  id             String          @id @default(uuid()) @db.Uuid
+  tenantId       String          @map("tenant_id") @db.Uuid
+  sku            String
+  barcode        String?
+  name           String
+  priceMinor     BigInt          @map("price_minor")
+  isActive       Boolean         @default(true) @map("is_active")
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  saleLines      SaleLine[]
+  stockBalances  StockBalance[]
+  stockMovements StockMovement[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, sku])
+  @@unique([tenantId, barcode])
+  @@map("product")
+  @@schema("forma_saas")
+}
+
+model Sale {
+  id                  String           @id @default(uuid()) @db.Uuid
+  tenantId            String           @map("tenant_id") @db.Uuid
+  branchId            String           @map("branch_id") @db.Uuid
+  registerId          String           @map("register_id") @db.Uuid
+  cashierMembershipId String           @map("cashier_membership_id") @db.Uuid
+  requestId           String           @map("request_id") @db.Uuid
+  receiptNumber       String           @map("receipt_number")
+  totalMinor          BigInt           @map("total_minor")
+  createdAt           DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  tenant              Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  branch              Branch           @relation(fields: [tenantId, branchId], references: [tenantId, id], onDelete: Restrict)
+  register            Register         @relation(fields: [tenantId, branchId, registerId], references: [tenantId, branchId, id], onDelete: Restrict)
+  cashier             TenantMembership @relation(fields: [tenantId, cashierMembershipId], references: [tenantId, id], onDelete: Restrict)
+  lines               SaleLine[]
+  movements           StockMovement[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, requestId])
+  @@unique([tenantId, receiptNumber])
+  @@unique([tenantId, branchId, id])
+  @@index([tenantId, branchId, createdAt])
+  @@map("sale")
+  @@schema("forma_saas")
+}
+
+model SaleLine {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  saleId         String   @map("sale_id") @db.Uuid
+  productId      String   @map("product_id") @db.Uuid
+  quantity       Int
+  unitPriceMinor BigInt   @map("unit_price_minor")
+  lineTotalMinor BigInt   @map("line_total_minor")
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  sale           Sale     @relation(fields: [tenantId, saleId], references: [tenantId, id], onDelete: Restrict)
+  product        Product  @relation(fields: [tenantId, productId], references: [tenantId, id], onDelete: Restrict)
+
+  @@index([tenantId, saleId])
+  @@map("sale_line")
+  @@schema("forma_saas")
+}
+
+model StockBalance {
+  tenantId   String  @map("tenant_id") @db.Uuid
+  branchId   String  @map("branch_id") @db.Uuid
+  productId  String  @map("product_id") @db.Uuid
+  quantity   Int     @default(0)
+  tenant     Tenant  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  branch     Branch  @relation(fields: [tenantId, branchId], references: [tenantId, id], onDelete: Restrict)
+  product    Product @relation(fields: [tenantId, productId], references: [tenantId, id], onDelete: Restrict)
+
+  @@id([tenantId, branchId, productId])
+  @@map("stock_balance")
+  @@schema("forma_saas")
+}
+
+model StockMovement {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  branchId     String   @map("branch_id") @db.Uuid
+  productId    String   @map("product_id") @db.Uuid
+  saleId       String?  @map("sale_id") @db.Uuid
+  quantityDelta Int     @map("quantity_delta")
+  reason       String
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  branch       Branch   @relation(fields: [tenantId, branchId], references: [tenantId, id], onDelete: Restrict)
+  product      Product  @relation(fields: [tenantId, productId], references: [tenantId, id], onDelete: Restrict)
+  sale         Sale?    @relation(fields: [tenantId, branchId, saleId], references: [tenantId, branchId, id], onDelete: Restrict)
+
+  @@index([tenantId, branchId, createdAt])
+  @@index([tenantId, productId, createdAt])
+  @@map("stock_movement")
+  @@schema("forma_saas")
+}

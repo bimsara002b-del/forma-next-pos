@@ -8,6 +8,20 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: saas-ci-only
+          POSTGRES_DB: forma_saas_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -37,6 +51,14 @@ jobs:
           POS_TEST_DATABASE_URL: "file:./pos-integration.test.db"
           POS_INVENTORY_TEST_DATABASE_URL: "file:./inventory-integration.test.db"
           POS_RETURN_TEST_DATABASE_URL: "file:./returns-integration.test.db"
+      - name: PostgreSQL tenant/RLS and transaction rollback (disposable CI DB)
+        run: psql -X -v ON_ERROR_STOP=1 -f tests/security/saas-tenant-foundation.sql
+        env:
+          PGHOST: localhost
+          PGPORT: "5432"
+          PGUSER: postgres
+          PGPASSWORD: saas-ci-only
+          PGDATABASE: forma_saas_ci
       - run: npm run build
         env:
           DATABASE_URL: "file:./ci.db"
