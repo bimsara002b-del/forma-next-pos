@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isStoreRole, wouldRemoveLastOwner } from "../src/lib/platform-accounts";
+import { isStoreRole, wouldRemoveLastOwner, wouldDemoteLastOwner } from "../src/lib/platform-accounts";
 describe("platform account role protections",()=>{
  it("accepts only store-level roles",()=>{
   expect(isStoreRole("OWNER")).toBe(true);
@@ -12,5 +12,9 @@ describe("platform account role protections",()=>{
   expect(wouldRemoveLastOwner("OWNER",true,"deactivate",2)).toBe(false);
   expect(wouldRemoveLastOwner("MANAGER",true,"deactivate",1)).toBe(false);
   expect(wouldRemoveLastOwner("OWNER",false,"activate",0)).toBe(false);
+  expect(wouldDemoteLastOwner("OWNER",true,"CASHIER",1)).toBe(true);
+  expect(wouldDemoteLastOwner("OWNER",true,"MANAGER",2)).toBe(false);
+  expect(wouldDemoteLastOwner("OWNER",false,"MANAGER",0)).toBe(false);
+  expect(wouldDemoteLastOwner("MANAGER",true,"CASHIER",0)).toBe(false);
  });
 });

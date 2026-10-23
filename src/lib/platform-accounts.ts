@@ -4,7 +4,8 @@ import { hashPassword, matchesPassword } from "./staff";
 export type StoreAccountRole = "OWNER" | "MANAGER" | "CASHIER";
 export type PlatformAccountAction =
   | { type: "activate" | "deactivate"; targetId: string }
-  | { type: "reset_password"; targetId: string; password: string };
+  | { type: "reset_password"; targetId: string; password: string }
+  | { type: "change_role"; targetId: string; role: StoreAccountRole };
 
 export type PlatformFailureCode =
   | "NOT_AUTHORIZED" | "ACCOUNT_NOT_FOUND" | "PROTECTED_ACCOUNT"
@@ -25,6 +26,12 @@ export function wouldRemoveLastOwner(
   return role === "OWNER" && active && action === "deactivate" && activeOwners <= 1;
 }
 
+export function wouldDemoteLastOwner(
+  currentRole: string, active: boolean, nextRole: string, activeOwners: number
+): boolean {
+  return currentRole === "OWNER" && active && nextRole !== "OWNER" && activeOwners <= 1;
+}
+
 export async function updatePlatformAccount(
   db: PrismaClient, actorId: string, action: PlatformAccountAction
 ) {
@@ -43,15 +50,19 @@ export async function updatePlatformAccount(
     if (!isStoreRole(target.role) || target.id === actorId)
       throw new PlatformAccountFailure("PROTECTED_ACCOUNT");
 
-    if (action.type !== "reset_password" &&
+    if (action.type === "change_role" && target.role === action.role)
+      throw new PlatformAccountFailure("NO_CHANGE");
+    if ((action.type === "activate" || action.type === "deactivate") &&
       target.isActive === (action.type === "activate"))
       throw new PlatformAccountFailure("NO_CHANGE");
 
-    if (action.type === "deactivate" && target.role === "OWNER" && target.isActive) {
+    if (target.role === "OWNER" && target.isActive &&
+      (action.type === "deactivate" || (action.type === "change_role" && action.role !== "OWNER"))) {
       const activeOwners = await tx.staffUser.count({
         where: { role: "OWNER", isActive: true }
       });
-      if (wouldRemoveLastOwner(target.role, target.isActive, action.type, activeOwners))
+      if ((action.type === "deactivate" && wouldRemoveLastOwner(target.role, target.isActive, action.type, activeOwners)) ||
+          (action.type === "change_role" && wouldDemoteLastOwner(target.role, target.isActive, action.role, activeOwners)))
         throw new PlatformAccountFailure("LAST_ACTIVE_OWNER");
     }
 
@@ -59,14 +70,18 @@ export async function updatePlatformAccount(
       where: { id: target.id },
       data: action.type === "reset_password"
         ? { passwordHash: passwordHash!, sessionVersion: { increment: 1 } }
-        : { isActive: action.type === "activate", sessionVersion: { increment: 1 } },
+        : action.type === "change_role"
+          ? { role: action.role, sessionVersion: { increment: 1 } }
+          : { isActive: action.type === "activate", sessionVersion: { increment: 1 } },
       select: {
         id: true, username: true, displayName: true, role: true,
         isActive: true, createdAt: true
       }
     });
     await tx.staffAuditEvent.create({
-      data: { actorId, targetId: target.id, action: "PLATFORM_" + action.type.toUpperCase() }
+      data: { actorId, targetId: target.id, action: action.type === "change_role"
+        ? "PLATFORM_ROLE_" + target.role + "_TO_" + action.role
+        : "PLATFORM_" + action.type.toUpperCase() }
     });
     return changed;
   });

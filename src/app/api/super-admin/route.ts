@@ -20,8 +20,18 @@ const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("activate"), targetId: z.string().min(1) }).strict(),
   z.object({ type: z.literal("deactivate"), targetId: z.string().min(1) }).strict(),
   z.object({ type: z.literal("reset_password"), targetId: z.string().min(1),
-    password: z.string().min(12).max(128) }).strict()
+    password: z.string().min(12).max(128) }).strict(),
+  z.object({ type: z.literal("change_role"), targetId: z.string().min(1),
+    role: z.enum(["OWNER", "MANAGER", "CASHIER"]) }).strict()
 ]);
+
+const listSchema = z.object({
+  q: z.string().max(100).default(""),
+  role: z.enum(["ALL", "OWNER", "MANAGER", "CASHIER"]).default("ALL"),
+  page: z.coerce.number().int().min(1).max(100000).default(1),
+  pageSize: z.coerce.number().int().min(1).max(50).default(20),
+  eventPage: z.coerce.number().int().min(1).max(100000).default(1)
+});
 
 const accountSelect = {
   id: true, username: true, displayName: true, role: true, isActive: true, createdAt: true
@@ -40,32 +50,39 @@ function isDenied(value: unknown): value is Response {
   return value instanceof Response;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const actor = await platformActor();
   if (isDenied(actor)) return actor;
 
+  const url = new URL(request.url);
+  const parsed = listSchema.safeParse(Object.fromEntries(url.searchParams));
+  if (!parsed.success) return Response.json({ error: "Invalid pagination or filter." }, { status: 400, headers });
+  const { q, role, page, pageSize, eventPage } = parsed.data;
+  const where = {
+    role: { in: role === "ALL" ? ["OWNER","MANAGER","CASHIER"] : [role] },
+    ...(q.trim() ? { OR: [
+      { username: { contains: q.trim() } },
+      { displayName: { contains: q.trim() } }
+    ] } : {})
+  };
+  const storeRoles = { role: { in: ["OWNER","MANAGER","CASHIER"] } };
   try {
-    const [accounts, events] = await Promise.all([
-      prisma.staffUser.findMany({
-        where: { role: { in: ["OWNER", "MANAGER", "CASHIER"] } },
-        orderBy: [{ role: "asc" }, { createdAt: "asc" }],
-        select: accountSelect, take: 200
-      }),
-      prisma.staffAuditEvent.findMany({
-        take: 25, orderBy: { createdAt: "desc" },
-        select: { id: true, actorId: true, targetId: true, action: true, createdAt: true }
-      })
-    ]);
-    const [totalUsers, activeUsers, ownerUsers, activeOwners] = await Promise.all([
-      prisma.staffUser.count({ where: { role: { in: ["OWNER", "MANAGER", "CASHIER"] } } }),
-      prisma.staffUser.count({ where: { role: { in: ["OWNER", "MANAGER", "CASHIER"] }, isActive: true } }),
-      prisma.staffUser.count({ where: { role: "OWNER" } }),
-      prisma.staffUser.count({ where: { role: "OWNER", isActive: true } })
-    ]);
-    return Response.json({
-      overview: { totalUsers, activeUsers, ownerUsers, activeOwners },
-      accounts, events
-    }, { headers });
+    const [accounts, matchedAccounts, events, eventCount, totalUsers, activeUsers, ownerUsers, activeOwners] =
+      await Promise.all([
+        prisma.staffUser.findMany({ where, orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          select: accountSelect, skip: (page-1)*pageSize, take: pageSize }),
+        prisma.staffUser.count({ where }),
+        prisma.staffAuditEvent.findMany({ take: 20, skip: (eventPage-1)*20,
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          select: { id:true, actorId:true, targetId:true, action:true, createdAt:true } }),
+        prisma.staffAuditEvent.count(),
+        prisma.staffUser.count({ where: storeRoles }),
+        prisma.staffUser.count({ where: { ...storeRoles, isActive: true } }),
+        prisma.staffUser.count({ where: { role: "OWNER" } }),
+        prisma.staffUser.count({ where: { role: "OWNER", isActive: true } })
+      ]);
+    return Response.json({ overview: { totalUsers, activeUsers, ownerUsers, activeOwners },
+      accounts, events, pagination: { page, pageSize, matchedAccounts, eventPage, eventCount } }, { headers });
   } catch {
     return Response.json({ error: "Unable to load platform accounts." }, { status: 500, headers });
   }
