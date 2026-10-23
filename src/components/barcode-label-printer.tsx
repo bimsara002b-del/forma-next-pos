@@ -6,6 +6,7 @@ import { BulkBarcodeLabels } from "./bulk-barcode-labels";
 import { PrinterProfileSettings } from "./printer-profile-settings";
 import { BarcodeLivePreview } from "./barcode-live-preview";
 import { BarcodeCalibration } from "./barcode-calibration";
+import { ScannerDiagnostics } from "./scanner-diagnostics";
 import { DEFAULT_PRINTER_PROFILE, renderLabelSheet, type PrinterProfile } from "@/lib/barcode-label-sheet";
 type Product={id:string;name:string;sku:string;barcode:string|null;priceCents:number};
 type Size="40x30"|"50x30"|"A4";
@@ -65,6 +66,7 @@ export function BarcodeLabelPrinter(){
   </form></div>
   <PrinterProfileSettings profile={profile} onChange={setProfile}/>
   <BarcodeCalibration profile={profile}/>
+  <ScannerDiagnostics products={products}/>
   <BulkBarcodeLabels products={products} profile={profile}/>
   <p className="small-disclaimer" style={{marginTop:16}}>Set paper size and 100% print scaling in your browser printer settings. Test real label printer and scanner readability. No stock is modified by printing.</p>
  </main>;
