@@ -37,10 +37,6 @@ export function BulkBarcodeLabels({ products, profile }: { products: LabelProduc
     try { validateLabelBatch(lines, paper); }
     catch (e) { validation = e instanceof Error ? e.message : "Invalid label batch."; }
   }
-  let preview = "";
-  try {
-    if (lines.length && !validation) preview = barcodeSvg(barcodeValue(lines[0].product));
-  } catch { /* Batch validation already explains unsupported barcodes. */ }
   function addProduct() {
     setError(""); setNotice("");
     if (!selected) { setError("Choose a product."); return; }
