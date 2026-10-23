@@ -107,6 +107,12 @@ The bootstrap creates username `superadmin` and prints a random **one-time passw
 Do not commit `.env` or passwords, or expose Codespaces ports publicly. This is not production-ready: SaaS tenants, subscription billing, MFA, and platform-wide security controls are future work.
 
 
+## Super Admin control center — local pilot
+
+The protected `/super-admin` page now has a responsive overview, local staff-account table with search and role filter, creation of OWNER/MANAGER/CASHIER accounts, activate/deactivate, password resets and recent account audit events. The platform API is guarded server-side, blocks management of SUPER_ADMIN accounts, invalidates target sessions after reset/disable, and protects the last active store owner. The Security page can change the current platform administrator's password and invalidate their existing sessions, requiring sign-in again. All management operations use the existing local SQLite staff and audit tables; no migrations or new stored secrets are required. Only 200 accounts appear in the local management table and search applies to the displayed portion. The whole account inventory is counted separately.
+
+**Important:** This is still a single-store private demo, not SaaS tenant management. Do not expose real business data, use a public Codespaces port or assume MFA, billing or multi-tenant boundaries exist.
+
 ## Inventory V2 — Safe Stock Adjustments and Search
 
 Inventory management now includes searchable products by name, SKU, barcode and category; low/out/archived filters; filtered CSV export; and a manager/owner audited Stock In / Stock Out adjustment form. Stock adjustments require a UUID, expected stock quantity, incident reason and note. The API rejects conflicting old stock counts, out-of-range inventory and duplicate request IDs with altered contents; an identical retry does not apply stock twice. The quick +10 / -1 buttons have been retired because they lacked audit context.
