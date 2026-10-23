@@ -1,7 +1,8 @@
 "use client";
 
 import { FormEvent, useMemo, useState } from "react";
-import { barcodeSvg, barcodeValue, MAX_BATCH_LABELS, MAX_BATCH_PRODUCTS,
+import { BarcodeLivePreview } from "./barcode-live-preview";
+import { barcodeValue, MAX_BATCH_LABELS, MAX_BATCH_PRODUCTS,
   renderLabelSheet, validateLabelBatch, type LabelOptions, type LabelPaper, type LabelProduct, type PrinterProfile } from "@/lib/barcode-label-sheet";
 
 type QueueLine = { productId: string; copies: number };
@@ -114,14 +115,10 @@ export function BulkBarcodeLabels({ products, profile }: { products: LabelProduc
           onChange={e => setOptions(o => ({ ...o, showCode: e.target.checked }))} /> Barcode text</label>
       </div>
       {validation && <p className="form-error" role="alert">{validation}</p>}
-      {lines.length > 0 && !validation && <div style={{ background: "#f1f5f9", padding: 16, borderRadius: 8, marginBottom: 15 }}>
-        <div style={{ width: 210, maxWidth: "100%", margin: "auto", padding: 12, color: "#000", background: "#fff", textAlign: "center" }}>
-          <strong style={{ fontSize: 12 }}>{lines[0].product.name}</strong>
-          <div style={{ height: 48 }} dangerouslySetInnerHTML={{ __html: preview }} />
-          <span style={{ fontSize: 10, fontFamily: "monospace" }}>{barcodeValue(lines[0].product)}</span>
-        </div>
-        <p className="small-disclaimer" style={{ textAlign: "center" }}>Preview: first product · {queue.length} unique products</p>
-      </div>}
+      {lines.length > 0 && !validation && <>
+        <BarcodeLivePreview product={lines[0].product} paper={paper} profile={profile} options={options}/>
+        <p className="small-disclaimer">Preview: first product · {queue.length} unique products</p>
+      </>}
       <button className="small-action" type="submit" disabled={!lines.length || !!validation}>
         Print {total} barcode labels
       </button>
