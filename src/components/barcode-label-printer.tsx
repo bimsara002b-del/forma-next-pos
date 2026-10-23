@@ -27,7 +27,7 @@ export function BarcodeLabelPrinter(){
  const product=products.find(p=>p.id===selected);
  const code=product?.barcode?.trim()||product?.sku.trim()||"";
  let bars="",valid=false;
- try{if(code){bars=svg(code);valid=size==="A4"||fitsLabel(code,size==="40x30"?40:50);}}catch{}
+ try{if(code){bars=svg(code);valid=fitsLabel(code,size==="A4"?48:size==="40x30"?40:50);}}catch{}
  function print(e:FormEvent){
   e.preventDefault();setError("");
   if(!product||!valid||!Number.isInteger(copies)||copies<1||copies>100){setError("Choose a valid product, label size and 1–100 copies.");return;}
@@ -36,17 +36,18 @@ export function BarcodeLabelPrinter(){
    '<div class="bars">'+bars+'</div>'+(codeText?'<span>'+escapeHtml(code)+'</span>':"")+
    (price?'<b>Rs. '+(product.priceCents/100).toFixed(2)+'</b>':"")+'</div>';
   const documentHtml='<!doctype html><html><head><title>Barcode labels</title><style>'+
-   '@page{size:'+(a4?'A4':width+'mm 30mm')+';margin:'+(a4?'8mm':'0')+'}'+
+   '@page{size:'+(a4?'A4':width+'mm 30mm')+';margin:'+(a4?'5mm':'0')+'}'+
    '*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;color:#000;background:#fff}'+
-   '.sheet{'+(a4?'display:grid;grid-template-columns:repeat(4,48mm);gap:2mm;':'')+'}'+
-   '.label{width:'+width+'mm;height:30mm;display:flex;flex-direction:column;justify-content:center;align-items:center;padding:1.5mm;overflow:hidden;text-align:center;'+(a4?'break-inside:avoid;':'break-after:page;')+'}'+
+   '.sheet{'+(a4?'display:grid;grid-template-columns:repeat(4,48mm);column-gap:2mm;row-gap:2mm;align-content:start;':'')+'}'+
+   '.label{width:'+width+'mm;height:30mm;display:flex;flex-direction:column;justify-content:center;align-items:center;padding:1.5mm;overflow:hidden;text-align:center;'+(a4?'break-inside:avoid;page-break-inside:avoid;':'break-after:page;')+'}'+
    '.label strong{font-size:9pt;line-height:1.1;max-height:9mm;overflow:hidden}'+
    '.bars{width:100%;height:12mm}.bars svg{width:100%;height:100%;fill:#000}'+
    '.label span{font:8pt monospace;white-space:nowrap}.label b{font-size:10pt}</style></head><body><div class="sheet">'+
    Array.from({length:copies},()=>label).join("")+'</div></body></html>';
   const win=window.open("","_blank","width=850,height=700");
   if(!win){setError("Allow pop-ups to print labels.");return;}
-  win.document.open();win.document.write(documentHtml);win.document.close();win.focus();win.print();
+  win.document.open();win.document.write(documentHtml);win.document.close();
+  win.addEventListener("load",()=>{win.focus();win.print();},{once:true});
  }
  const filtered=products.filter(p=>[p.name,p.sku,p.barcode??""].some(s=>s.toLowerCase().includes(query.toLowerCase())));
  return <main className="content-scroll" style={{maxWidth:1000,margin:"auto"}}>
