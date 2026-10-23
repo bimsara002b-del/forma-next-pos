@@ -218,6 +218,7 @@ export function PosWorkspace({canManageStaff=false,canManageInventory=true}:{can
         {navigation.map(entry => <button type="button" key={entry.key} className={"nav-button" + (entry.key === view ? " active" : "")} onClick={() => setView(entry.key)}>
           <entry.icon size={19} strokeWidth={1.8}/><span>{entry.title}</span>{entry.key === "pos" && <small>F4</small>}
         </button>)}
+        {canManageInventory && <Link className="nav-button" href="/procurement"><Boxes size={19}/><span>Procurement</span></Link>}
         {canManageStaff && <Link className="nav-button" href="/staff"><Users size={19}/><span>Staff Accounts</span></Link>}
       </nav>
       <div className="sidebar-foot"><div className="store-avatar">F</div><div className="sidebar-store"><strong>Forma Demo Store</strong><small>Local register 01</small></div>
