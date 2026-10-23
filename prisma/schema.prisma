@@ -22,6 +22,7 @@ model Product {
   updatedAt   DateTime        @updatedAt
   saleItems   SaleItem[]
   movements   StockMovement[]
+  receiptLines InventoryReceiptLine[]
 
   @@index([name])
   @@index([category])
@@ -150,4 +151,33 @@ model CashMovement {
   createdAt   DateTime  @default(now())
 
   @@index([shiftId, createdAt])
+}
+
+
+// Additive purchase-receiving ledger for a local single-store demo.
+// requestId makes a repeated receive operation idempotent.
+model InventoryReceipt {
+  id           String                 @id @default(cuid())
+  requestId    String                 @unique
+  supplierName String
+  reference    String
+  receivedById String
+  createdAt    DateTime               @default(now())
+  lines        InventoryReceiptLine[]
+
+  @@index([createdAt])
+}
+
+model InventoryReceiptLine {
+  id               String           @id @default(cuid())
+  receiptId        String
+  receipt          InventoryReceipt @relation(fields: [receiptId], references: [id])
+  productId        String
+  product          Product          @relation(fields: [productId], references: [id])
+  productName      String
+  quantity         Int
+  unitCostCents    Int
+
+  @@index([receiptId])
+  @@index([productId])
 }
