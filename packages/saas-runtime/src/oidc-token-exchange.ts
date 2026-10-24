@@ -98,12 +98,12 @@ export async function exchangeVerifiedOidcCode(
       method: "POST",
       headers: {
         Accept: "application/json",
-        "Content-Type": "application/x-www-form-urlencoded"
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Cache-Control": "no-store"
       },
       body: form,
       redirect: "manual",
       credentials: "omit",
-      cache: "no-store",
       signal: AbortSignal.timeout(5000)
     });
     if (response.status !== 200 ||
