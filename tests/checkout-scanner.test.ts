@@ -19,11 +19,28 @@ describe("safe POS checkout barcode scans", () => {
     });
     expect(resolveCheckoutScan("MIL", catalog, []).status).toBe("unknown");
   });
-  it("detects ambiguity between a barcode and another product SKU", () => {
+  it("prioritizes an exact barcode over another product's colliding SKU", () => {
+    const collision = [...catalog, {
+      id: "d", name: "Other SKU", sku: "001234", barcode: null, stockQty: 1
+    }];
+    expect(resolveCheckoutScan("001234", collision, [])).toMatchObject({
+      status: "matched", productId: "a"
+    });
+    expect(applyCheckoutScan("001234", collision, []).cart).toEqual([
+      { productId: "a", quantity: 1 }
+    ]);
+  });
+  it("rejects duplicate exact barcodes without guessing a product", () => {
     const duplicate = [...catalog, {
-      id: "d", name: "Duplicate", sku: "001234", barcode: null, stockQty: 1
+      id: "d", name: "Duplicate", sku: "OTHER", barcode: "001234", stockQty: 1
     }];
     expect(resolveCheckoutScan("001234", duplicate, []).status).toBe("ambiguous");
+  });
+  it("rejects ambiguous SKU fallback without an exact barcode hit", () => {
+    const duplicate = [...catalog, {
+      id: "d", name: "Duplicate SKU", sku: "tea-2", barcode: null, stockQty: 1
+    }];
+    expect(resolveCheckoutScan("TEA-2", duplicate, []).status).toBe("ambiguous");
   });
   it("does not add out-of-stock products or exceed reserved cart stock", () => {
     expect(resolveCheckoutScan("000000", catalog, []).status).toBe("out-of-stock");
@@ -55,7 +72,7 @@ describe("rapid scanning cannot overrun loaded stock",()=>{
  it("never changes the cart on unknown or ambiguous scans",()=>{
   const cart=[{productId:"a",quantity:1}];
   expect(applyCheckoutScan("MIL",catalog,cart).cart).toBe(cart);
-  const duplicate=[...catalog,{id:"d",name:"Dup",sku:"001234",barcode:null,stockQty:5}];
+  const duplicate=[...catalog,{id:"d",name:"Dup",sku:"OTHER",barcode:"001234",stockQty:5}];
   expect(applyCheckoutScan("001234",duplicate,cart).result.status).toBe("ambiguous");
   expect(applyCheckoutScan("001234",duplicate,cart).cart).toBe(cart);
  });
