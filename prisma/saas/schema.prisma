@@ -256,3 +256,15 @@ model ProviderIdentity {
   @@map("provider_identity")
   @@schema("forma_saas")
 }
+
+model OidcAuthFlow {
+ stateDigest String @id @map("state_digest") @db.Char(64)
+ verifier String @db.Char(43)
+ nonce String @db.Char(43)
+ configHash String @map("config_hash") @db.Char(64)
+ createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+ expiresAt DateTime @map("expires_at") @db.Timestamptz(6)
+ @@index([expiresAt])
+ @@map("oidc_auth_flow")
+ @@schema("forma_saas")
+}

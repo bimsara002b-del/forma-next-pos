@@ -143,3 +143,8 @@ and ordinary runtime roles lack privileges. Unit/real PostgreSQL CI must pass.
 No identity provisioning UI, OIDC token exchange or public SaaS login exists.
 A privileged table owner can delete/reprovision links; audit and provisioning
 policies remain future release blockers.
+
+
+## M30 Durable OIDC PKCE flow (Draft)
+
+New isolated PostgreSQL migration 000007 uses FORCE RLS and restricted security-definer issue and consume functions to persist only state digests with PKCE verifier, nonce and config binding for up to five minutes. The flow store uses atomic DELETE RETURNING to prevent two app instances from using the same state. Separate restricted CI role and real PostgreSQL replay/permission tests added. This is NOT token endpoint exchange, verified login or production-ready OAuth; no live routes or database migrations performed.

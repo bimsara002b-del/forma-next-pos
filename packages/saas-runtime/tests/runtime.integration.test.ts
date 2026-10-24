@@ -5,6 +5,8 @@ import { createTenantRuntime } from "../src/runtime";
 import { createSessionCredential,hashSessionToken } from "../src/session";
 import { createPgIdentitySessionWriter } from "../src/identity-db-writer";
 import { issueVerifiedSession } from "../src/identity-lifecycle";
+import {createPgOidcFlowStore} from "../src/oidc-flow-db";
+import {beginOidc,consumeOidc,type OidcConfig} from "../src/oidc-pkce-flow";
 const adminUrl=process.env.SAAS_TEST_ADMIN_URL, appUrl=process.env.SAAS_TEST_APP_URL;
 const A="11111111-1111-1111-1111-111111111111", B="22222222-2222-2222-2222-222222222222";
 const user="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", stranger="bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
@@ -30,12 +32,13 @@ describe.skipIf(!adminUrl&&!appUrl)("Prisma 7 restricted-role tenant transaction
   admin=new Pool({connectionString:testUrl(adminUrl),max:1});testUrl(appUrl);
   if((await admin.query("SELECT to_regnamespace('forma_saas') AS schema")).rows[0].schema)
    throw new Error("Requires empty database; refusing to modify existing schema");
-  for(const file of ["20261023_000001_tenant_foundation","20261024_000002_member_assignments","20261024_000003_revocable_sessions","20261024_000004_identity_functions","20261024_000005_provider_identity","20261024_000006_provider_identity_immutability"])
+  for(const file of ["20261023_000001_tenant_foundation","20261024_000002_member_assignments","20261024_000003_revocable_sessions","20261024_000004_identity_functions","20261024_000005_provider_identity","20261024_000006_provider_identity_immutability","20261024_000007_oidc_flow_store"])
    await admin.query(await readFile(new URL(`../../../prisma/saas/migrations/${file}/migration.sql`,import.meta.url),"utf8"));
   await admin.query(`
    CREATE ROLE forma_runtime_test LOGIN PASSWORD 'runtime-test-only' NOSUPERUSER NOBYPASSRLS;
    CREATE ROLE forma_identity_test LOGIN PASSWORD 'identity-test-only' NOSUPERUSER NOBYPASSRLS;
    CREATE ROLE forma_identity_admin_test LOGIN PASSWORD 'identity-admin-test-only' NOSUPERUSER NOBYPASSRLS;
+   CREATE ROLE forma_oidc_flow_test LOGIN PASSWORD 'oidc-flow-test-only' NOSUPERUSER NOBYPASSRLS;
    GRANT USAGE ON SCHEMA forma_saas TO forma_identity_test;
    GRANT EXECUTE ON FUNCTION forma_saas.identity_issue_session(uuid,text,timestamptz,timestamptz) TO forma_identity_test;
    GRANT EXECUTE ON FUNCTION forma_saas.identity_revoke_hash(text) TO forma_identity_test;
@@ -44,6 +47,9 @@ describe.skipIf(!adminUrl&&!appUrl)("Prisma 7 restricted-role tenant transaction
    GRANT USAGE ON SCHEMA forma_saas TO forma_identity_admin_test;
    GRANT EXECUTE ON FUNCTION forma_saas.identity_issue_provider_session(text,text,text,text,timestamptz,timestamptz) TO forma_identity_test;
    GRANT EXECUTE ON FUNCTION forma_saas.identity_unlink_provider(text,text,text) TO forma_identity_admin_test;
+   GRANT USAGE ON SCHEMA forma_saas TO forma_oidc_flow_test;
+   GRANT EXECUTE ON FUNCTION forma_saas.oidc_flow_begin(text,text,text,text,timestamptz) TO forma_oidc_flow_test;
+   GRANT EXECUTE ON FUNCTION forma_saas.oidc_flow_consume(text) TO forma_oidc_flow_test;
    GRANT USAGE ON SCHEMA forma_saas TO forma_runtime_test;
    GRANT SELECT ON forma_saas.tenant_membership,forma_saas.member_branch,forma_saas.member_register,
     forma_saas.branch,forma_saas.register,forma_saas.product,
@@ -330,6 +336,30 @@ describe.skipIf(!adminUrl&&!appUrl)("Prisma 7 restricted-role tenant transaction
    await admin.query("DELETE FROM forma_saas.app_user WHERE id IN ($1,$2)",[first,second]);
    await writer.close();
   }
+ });
+ it("M30 durable PostgreSQL OIDC state is consumed at most once across instances",async()=>{
+  const url="postgresql://forma_oidc_flow_test:oidc-flow-test-only@127.0.0.1:5432/forma_saas_runtime_test";
+  const config:OidcConfig={issuer:"https://login.example.test/tenant",
+   authorizationEndpoint:"https://login.example.test/authorize",
+   tokenEndpoint:"https://login.example.test/token",clientId:"forma-oidc",
+   redirectUri:"https://pos.example.test/auth/callback"};
+  const a=createPgOidcFlowStore({connectionString:url});
+  const b=createPgOidcFlowStore({connectionString:url});
+  const tenant=new Pool({connectionString:appUrl!,max:1});
+  const direct=new Pool({connectionString:url,max:1});
+  try{
+   await expect(direct.query("SELECT * FROM forma_saas.oidc_auth_flow")).rejects.toThrow();
+   await expect(tenant.query("SELECT * FROM forma_saas.oidc_flow_consume($1)",["a".repeat(64)])).rejects.toThrow();
+   const start=await beginOidc(config,a),state=new URL(start.url).searchParams.get("state")!;
+   const params=new URLSearchParams({state,code:"server-only-code"});
+   const result=await Promise.allSettled([consumeOidc(config,a,params),consumeOidc(config,b,params)]);
+   expect(result.filter(x=>x.status==="fulfilled")).toHaveLength(1);
+   expect(result.filter(x=>x.status==="rejected")).toHaveLength(1);
+   const declined=await beginOidc(config,a);
+   const invalid=new URLSearchParams({state:new URL(declined.url).searchParams.get("state")!,error:"access_denied"});
+   await expect(consumeOidc(config,b,invalid)).rejects.toThrow("PROVIDER_REJECTED");
+   await expect(consumeOidc(config,a,invalid)).rejects.toThrow("EXPIRED_OR_REPLAYED_STATE");
+  }finally{await a.close();await b.close();await direct.end();await tenant.end();}
  });
  it("rejects a pool carrying non-local session context",async()=>{
   const dirty=createTenantRuntime({connectionString:appUrl!,readSessionToken:async()=>credential.token,poolSize:1});
