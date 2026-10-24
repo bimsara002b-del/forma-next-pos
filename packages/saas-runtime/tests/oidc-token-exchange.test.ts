@@ -37,7 +37,8 @@ describe("M30 isolated public-client OIDC code-to-verified-subject exchange",()=
   expect(JSON.stringify(verified)).not.toContain("access-secret");
   const [url,init]=transport.mock.calls[0] as unknown as [string,RequestInit];
   expect(url).toBe(config.tokenEndpoint);
-  expect(init).toMatchObject({method:"POST",redirect:"manual",cache:"no-store",credentials:"omit"});
+  expect(init).toMatchObject({method:"POST",redirect:"manual",credentials:"omit"});
+  expect(new Headers(init.headers).get("Cache-Control")).toBe("no-store");
   const params=new URLSearchParams(init.body as URLSearchParams);
   expect(params.get("code")).toBe(consumed.code);
   expect(params.get("code_verifier")).toBe(consumed.codeVerifier);
