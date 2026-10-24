@@ -9,6 +9,7 @@ type Report={
  margin:{knownCostLineCount:number;unknownCostLineCount:number;coveredRevenueCents:number;knownCostCents:number;grossProfitOnCoveredSalesCents:number;method:string};
  inventory:{lowStockProducts:number;knownCostStockUnits:number;knownCostValuationCents:number;unknownCostProducts:number;activeProductCount:number;valuationMethod:string};
  closedShifts:{count:number;netCashVarianceCents:number};
+ shiftReconciliation:{limited:boolean;recent:{id:string;closedAt:string|null;openingFloatCents:number;cashSalesCents:number;cashInCents:number;cashOutCents:number;refundCents:number;otherCents:number;ledgerExpectedCents:number;recordedExpectedCents:number|null;countedCashCents:number|null;ledgerVarianceCents:number|null;matchesClosingSnapshot:boolean}[]};
  topProducts:{productId:string;name:string;quantity:number;revenueCents:number}[];
  refunds:{count:number;amountCents:number;netCashRevenueCents:number;note:string};
  daily:{date:string;salesCount:number;revenueCents:number}[]|null;dailyChartComplete:boolean;
@@ -68,6 +69,18 @@ export function ReportsDashboard(){
     <div className="table-scroll"><table><thead><tr><th>Product</th><th>Units</th><th>Sales revenue</th></tr></thead>
      <tbody>{result.topProducts.map(x=><tr key={x.productId}><td>{x.name}</td><td>{x.quantity}</td><td>{formatMoney(x.revenueCents)}</td></tr>)}</tbody>
     </table></div>
+   </div>
+   <div className="panel" style={{padding:20,marginBottom:18}}><h3>Closed cash shift reconciliation</h3>
+    <p className="small-disclaimer">Latest 20 closed shifts in the selected period. Refunds are already negative cash movements; never subtract twice. Read-only audit, not accounting certification.</p>
+    <div className="table-scroll"><table><thead><tr><th>Closed (UTC)</th><th>Cash sales</th><th>Refund movement</th><th>Expected (ledger)</th><th>Counted</th><th>Variance</th><th>Check</th></tr></thead>
+     <tbody>{result.shiftReconciliation.recent.map(row=><tr key={row.id}>
+      <td>{row.closedAt??"—"}</td><td>{formatMoney(row.cashSalesCents)}</td>
+      <td>{formatMoney(row.refundCents)}</td><td>{formatMoney(row.ledgerExpectedCents)}</td>
+      <td>{row.countedCashCents===null?"—":formatMoney(row.countedCashCents)}</td>
+      <td>{row.ledgerVarianceCents===null?"—":formatMoney(row.ledgerVarianceCents)}</td>
+      <td>{row.matchesClosingSnapshot?"Matched":"Review"}</td>
+     </tr>)}</tbody></table></div>
+    {result.shiftReconciliation.limited&&<p className="small-disclaimer">Showing latest 20 shifts; period-level totals remain complete.</p>}
    </div>
    <div className="panel" style={{padding:20}}><h3>Profit coverage and inventory</h3>
     <p>Sales: {result.sales.count} · Known-cost lines: {result.margin.knownCostLineCount} · Missing-cost lines: {result.margin.unknownCostLineCount}</p>

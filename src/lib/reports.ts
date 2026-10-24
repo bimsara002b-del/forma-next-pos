@@ -39,13 +39,27 @@ export function salesBySriLankaDay(sales: HistorySale[], window: ReportingWindow
   return [...result.values()];
 }
 
+/** Refunds already have a negative REFUND cash movement. Never subtract them twice. */
+export function reconcileShiftLedger(input:{
+ openingFloatCents:number;cashSalesCents:number;cashMovementsCents:number;
+ recordedExpectedCents:number|null;countedCashCents:number|null;recordedVarianceCents:number|null;
+}){
+ const ledgerExpectedCents=input.openingFloatCents+input.cashSalesCents+input.cashMovementsCents;
+ if(![input.openingFloatCents,input.cashSalesCents,input.cashMovementsCents,ledgerExpectedCents].every(Number.isSafeInteger))
+  throw new ReportInputError("Invalid cash shift ledger.");
+ const ledgerVarianceCents=input.countedCashCents===null?null:input.countedCashCents-ledgerExpectedCents;
+ const matchesClosingSnapshot=input.recordedExpectedCents===ledgerExpectedCents &&
+  input.recordedVarianceCents===ledgerVarianceCents;
+ return {ledgerExpectedCents,ledgerVarianceCents,matchesClosingSnapshot};
+}
+
 export async function generateReports(db: PrismaClient, window: ReportingWindow) {
   const where = { createdAt: { gte: window.from, lt: window.toExclusive } };
   const lineWhere = { sale: { createdAt: { gte: window.from, lt: window.toExclusive } } };
   const knownCostLineWhere = { ...lineWhere, lineCostCents: { not: null } };
   const [
     saleTotals, itemTotals, knownCostTotals, knownCostLineCount,
-    topProducts, dailySalesLimited, products, closingShifts, refunded
+    topProducts, dailySalesLimited, products, closingShifts, refunded, recentShiftRows
   ] = await Promise.all([
     db.sale.aggregate({ where, _count: { _all: true }, _sum: { totalCents: true } }),
     db.saleItem.aggregate({ where: lineWhere, _count: { _all: true }, _sum: { quantity: true } }),
@@ -71,8 +85,48 @@ export async function generateReports(db: PrismaClient, window: ReportingWindow)
     db.saleReturn.aggregate({
       where: { createdAt: { gte: window.from, lt: window.toExclusive } },
       _count: { _all: true }, _sum: { refundCents: true }
-    })
+    }),
+    db.cashShift.findMany({where:{status:"CLOSED",closedAt:{gte:window.from,lt:window.toExclusive}},
+      orderBy:{closedAt:"desc"},take:20,
+      select:{id:true,openedAt:true,closedAt:true,openingFloatCents:true,countedCashCents:true,expectedCashCents:true,varianceCents:true}})
   ]);
+
+  const recentShiftIds=recentShiftRows.map(shift=>shift.id);
+  const [shiftSales,shiftMovements]=await Promise.all([
+    db.sale.groupBy({by:["shiftId"],where:{shiftId:{in:recentShiftIds},paymentMethod:"CASH"},
+      _sum:{totalCents:true}}),
+    db.cashMovement.groupBy({by:["shiftId","type"],where:{shiftId:{in:recentShiftIds}},
+      _sum:{changeCents:true}})
+  ]);
+  const salesByShift=new Map(shiftSales.map(row=>[row.shiftId,row._sum.totalCents??0]));
+  const movementByShift=new Map<string,{cashInCents:number;cashOutCents:number;refundCents:number;otherCents:number}>();
+  for(const movement of shiftMovements){
+    const id=movement.shiftId,existing=movementByShift.get(id)??{
+      cashInCents:0,cashOutCents:0,refundCents:0,otherCents:0
+    };
+    const amount=movement._sum.changeCents??0;
+    if(movement.type==="CASH_IN")existing.cashInCents+=amount;
+    else if(movement.type==="CASH_OUT")existing.cashOutCents+=amount;
+    else if(movement.type==="REFUND")existing.refundCents+=amount;
+    else existing.otherCents+=amount;
+    movementByShift.set(id,existing);
+  }
+  const shiftReconciliation=recentShiftRows.map(shift=>{
+    const salesCents=salesByShift.get(shift.id)??0;
+    const movements=movementByShift.get(shift.id)??{cashInCents:0,cashOutCents:0,refundCents:0,otherCents:0};
+    const netMovementsCents=movements.cashInCents+movements.cashOutCents+
+      movements.refundCents+movements.otherCents;
+    const computed=reconcileShiftLedger({
+      openingFloatCents:shift.openingFloatCents,cashSalesCents:salesCents,
+      cashMovementsCents:netMovementsCents,recordedExpectedCents:shift.expectedCashCents,
+      countedCashCents:shift.countedCashCents,recordedVarianceCents:shift.varianceCents
+    });
+    return {id:shift.id,openedAt:shift.openedAt.toISOString(),
+      closedAt:shift.closedAt?.toISOString()??null,openingFloatCents:shift.openingFloatCents,
+      cashSalesCents:salesCents,...movements,netMovementsCents,
+      recordedExpectedCents:shift.expectedCashCents,countedCashCents:shift.countedCashCents,
+      recordedVarianceCents:shift.varianceCents,...computed};
+  });
 
   // Never display a partially aggregated daily chart as if it were complete.
   const dailyComplete = dailySalesLimited.length <= 10_000;
@@ -113,6 +167,7 @@ export async function generateReports(db: PrismaClient, window: ReportingWindow)
       netCashRevenueCents: (saleTotals._sum.totalCents ?? 0) - (refunded._sum.refundCents ?? 0),
       note: "Refunds grouped by refund date; gross sales grouped by sale date. Coverage-specific gross profit does not subtract refund cost/revenue."
     },
+    shiftReconciliation: {recent:shiftReconciliation,limited:closingShifts._count._all>20},
     closedShifts: {
       count: closingShifts._count._all,
       netCashVarianceCents: closingShifts._sum.varianceCents ?? 0
