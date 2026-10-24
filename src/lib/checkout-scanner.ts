@@ -21,9 +21,11 @@ export function resolveCheckoutScan(
   if (!code || code.length > 80 || !/^[\x20-\x7e]+$/.test(code))
     return { status: "invalid", code };
   // Preserve leading zeroes and barcode casing. SKUs are case-insensitive.
-  const matches = products.filter(product =>
-    product.barcode?.trim() === code || product.sku.toLowerCase() === code.toLowerCase()
-  );
+  // Exact barcode takes precedence over an unrelated product SKU collision.
+  // Duplicate exact barcodes remain ambiguous; never guess a product.
+  const barcodeMatches = products.filter(product => product.barcode === code);
+  const matches = barcodeMatches.length > 0 ? barcodeMatches :
+    products.filter(product => product.sku.toLowerCase() === code.toLowerCase());
   if (matches.length === 0) return { status: "unknown", code };
   if (matches.length > 1) return { status: "ambiguous", code };
   const [product] = matches;
