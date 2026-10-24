@@ -133,3 +133,13 @@ Manager or Owner can now queue up to 30 different active products and a combined
 ## POS keyboard-wedge barcode scanner checkout (Draft PR)
 
 The cashier catalog now separates **F2 Scan** (exact barcode or case-insensitive SKU + Enter) from **F3 Search** (fuzzy find; choose the product card). Scanning is never matched to a single fuzzy result: unknown/duplicate/out-of-stock codes cannot silently add the wrong product. The scan input is disabled during checkout/product dialogs or uncertain cash checkout; F4 opens checkout only from POS when idle, and function shortcuts ignore modifiers and auto-repeat. Quantity increases are limited by currently loaded stock and the existing server-authoritative checkout remains the final stock safety check. Leading zeroes are preserved. No global keyboard interception, raw HID access or DB changes; scanners need to act as a keyboard and append Enter or cashier can click Add. Browser/HID hardware QA is required before retail deployment.
+
+## M27 — isolated PostgreSQL/Prisma 7 runtime
+
+`packages/saas-runtime` provides a separately pinned Prisma 7 client/pg adapter,
+live membership and branch/register assignment checks, transaction-local RLS,
+restricted-role enforcement and a bounded catalog DAL example. Its dedicated
+PostgreSQL CI job exercises real adapter pooling, tenant isolation and rollback.
+See [runtime setup and security contract](packages/saas-runtime/README.md).
+Existing root Prisma 6 / SQLite routes are unchanged. This is not a production
+cutover; session-provider wiring and complete financial migration remain pending.

@@ -8,6 +8,7 @@ DO $guard$ BEGIN
 END $guard$;
 BEGIN;
 \ir ../../prisma/saas/migrations/20261023_000001_tenant_foundation/migration.sql
+\ir ../../prisma/saas/migrations/20261024_000002_member_assignments/migration.sql
 
 INSERT INTO forma_saas.app_user(id,email_normalized) VALUES
  ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa','a@example.test');
@@ -192,6 +193,8 @@ BEGIN
    RAISE EXCEPTION 'FAIL: tenant context survived transaction rollback';
  END IF;
  IF to_regclass('forma_saas.product') IS NOT NULL OR
+    to_regclass('forma_saas.member_branch') IS NOT NULL OR
+    to_regclass('forma_saas.member_register') IS NOT NULL OR
     EXISTS (SELECT 1 FROM pg_roles WHERE rolname='forma_saas_ci_reader') THEN
    RAISE EXCEPTION 'FAIL: migration/role rollback left side effects';
  END IF;

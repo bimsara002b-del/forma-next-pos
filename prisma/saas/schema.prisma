@@ -7,7 +7,7 @@
  */
 generator client {
   provider = "prisma-client"
-  output   = "../../src/generated/saas-prisma"
+  output   = "../../packages/saas-runtime/generated"
 }
 
 datasource db {
@@ -57,6 +57,8 @@ model TenantMembership {
   tenant              Tenant      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   user                AppUser     @relation(fields: [userId], references: [id], onDelete: Restrict)
   cashierSales        Sale[]
+  branchAssignments MemberBranch[]
+  registerAssignments MemberRegister[]
 
   @@unique([tenantId, id])
   @@unique([tenantId, userId])
@@ -72,6 +74,7 @@ model Branch {
   isActive       Boolean         @default(true) @map("is_active")
   tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   registers      Register[]
+  memberAssignments MemberBranch[]
   sales          Sale[]
   stockBalances  StockBalance[]
   stockMovements StockMovement[]
@@ -91,6 +94,7 @@ model Register {
   tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   branch    Branch   @relation(fields: [tenantId, branchId], references: [tenantId, id], onDelete: Restrict)
   sales     Sale[]
+  memberAssignments MemberRegister[]
 
   @@unique([tenantId, id])
   @@unique([tenantId, branchId, code])
@@ -194,4 +198,28 @@ model StockMovement {
   @@index([tenantId, productId, createdAt])
   @@map("stock_movement")
   @@schema("forma_saas")
+}
+
+model MemberBranch {
+ tenantId String @map("tenant_id") @db.Uuid
+ membershipId String @map("membership_id") @db.Uuid
+ branchId String @map("branch_id") @db.Uuid
+ membership TenantMembership @relation(fields:[tenantId,membershipId],references:[tenantId,id],onDelete:Restrict)
+ branch Branch @relation(fields:[tenantId,branchId],references:[tenantId,id],onDelete:Restrict)
+ registers MemberRegister[]
+ @@id([tenantId,membershipId,branchId])
+ @@map("member_branch")
+ @@schema("forma_saas")
+}
+model MemberRegister {
+ tenantId String @map("tenant_id") @db.Uuid
+ membershipId String @map("membership_id") @db.Uuid
+ branchId String @map("branch_id") @db.Uuid
+ registerId String @map("register_id") @db.Uuid
+ membership TenantMembership @relation(fields:[tenantId,membershipId],references:[tenantId,id],onDelete:Restrict)
+ assignment MemberBranch @relation(fields:[tenantId,membershipId,branchId],references:[tenantId,membershipId,branchId],onDelete:Restrict)
+ register Register @relation(fields:[tenantId,branchId,registerId],references:[tenantId,branchId,id],onDelete:Restrict)
+ @@id([tenantId,membershipId,registerId])
+ @@map("member_register")
+ @@schema("forma_saas")
 }

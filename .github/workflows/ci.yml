@@ -64,3 +64,38 @@ jobs:
           DATABASE_URL: "file:./ci.db"
           POS_ACCESS_PASSWORD: "ci-only-secure-password"
           POS_SESSION_SECRET: "test-session-secret-01234567890123456789012345"
+  saas-runtime:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: runtime-admin-test-only
+          POSTGRES_DB: forma_saas_runtime_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    defaults:
+      run:
+        working-directory: packages/saas-runtime
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci --no-audit --no-fund
+      - run: npm run validate
+      - run: npm run generate
+      - run: npm run typecheck
+      - name: Real Prisma adapter, assignment, rollback and pool isolation tests
+        run: npm test
+        env:
+          SAAS_TEST_ADMIN_URL: postgresql://postgres:runtime-admin-test-only@127.0.0.1:5432/forma_saas_runtime_test
+          SAAS_TEST_APP_URL: postgresql://forma_runtime_test:runtime-test-only@127.0.0.1:5432/forma_saas_runtime_test
