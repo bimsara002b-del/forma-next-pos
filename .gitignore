@@ -15,3 +15,5 @@ coverage
 
 # Future Prisma 7 SaaS client is generated, never committed.
 src/generated/saas-prisma/
+
+packages/saas-runtime/generated/
