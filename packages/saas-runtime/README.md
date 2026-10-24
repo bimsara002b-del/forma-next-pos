@@ -118,3 +118,8 @@ The optional `identity-lifecycle.ts` module defines a **server-only application 
 
 Related: https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html
 
+
+
+## M30 provider identity atomicity (Draft)
+
+The opt-in 000005 SQL introduces issuer/client/subject links and SECURITY DEFINER atomic issue/unlink functions. Both use account-row locking before link-row locking; unlink revokes all user sessions. No PUBLIC grants, schema cutover, account linking endpoint or live provider login. Functions must be reviewed with PostgreSQL role/ownership and adversarial concurrent transaction tests before permissions or production use.
