@@ -1,4 +1,5 @@
 import { PrismaClient } from "@prisma/client";
+import {summarizeRefundMargin} from "./refund-margin";
 import { sriLankaDate, dateDaysBefore, COLOMBO_OFFSET_MS, REPORT_TIMEZONE } from "./report-calendar";
 
 export type ReportingWindow = { from: Date; toExclusive: Date; fromDate: string; toDate: string };
@@ -59,7 +60,7 @@ export async function generateReports(db: PrismaClient, window: ReportingWindow)
   const knownCostLineWhere = { ...lineWhere, lineCostCents: { not: null } };
   const [
     saleTotals, itemTotals, knownCostTotals, knownCostLineCount,
-    topProducts, dailySalesLimited, products, closingShifts, refunded, recentShiftRows
+    topProducts, dailySalesLimited, products, closingShifts, refunded, recentShiftRows, refundHistory
   ] = await Promise.all([
     db.sale.aggregate({ where, _count: { _all: true }, _sum: { totalCents: true } }),
     db.saleItem.aggregate({ where: lineWhere, _count: { _all: true }, _sum: { quantity: true } }),
@@ -86,11 +87,19 @@ export async function generateReports(db: PrismaClient, window: ReportingWindow)
       where: { createdAt: { gte: window.from, lt: window.toExclusive } },
       _count: { _all: true }, _sum: { refundCents: true }
     }),
+    db.saleReturnLine.findMany({
+      where:{saleReturn:{createdAt:{gte:window.from,lt:window.toExclusive}}},
+      select:{quantity:true,refundCents:true,restocked:true,
+        saleItem:{select:{unitCostCents:true}}}
+    }),
     db.cashShift.findMany({where:{status:"CLOSED",closedAt:{gte:window.from,lt:window.toExclusive}},
       orderBy:{closedAt:"desc"},take:20,
       select:{id:true,openedAt:true,closedAt:true,openingFloatCents:true,countedCashCents:true,expectedCashCents:true,varianceCents:true}})
   ]);
 
+  const refundMargin=summarizeRefundMargin(refundHistory.map(line=>({quantity:line.quantity,
+    refundCents:line.refundCents,restocked:line.restocked,
+    unitCostCents:line.saleItem.unitCostCents})));
   const recentShiftIds=recentShiftRows.map(shift=>shift.id);
   const [shiftSales,shiftMovements]=await Promise.all([
     db.sale.groupBy({by:["shiftId"],where:{shiftId:{in:recentShiftIds},paymentMethod:"CASH"},
@@ -161,6 +170,10 @@ export async function generateReports(db: PrismaClient, window: ReportingWindow)
     },
     inventory: { ...inventory, activeProductCount: products.length,
       valuationMethod: "Current stock × current known unit cost, not historical FIFO." },
+    refundMargin:{...refundMargin,
+      knownCostSalesMarginCents:knownRevenueCents-knownCostCents,
+      adjustedKnownCostMarginCents:knownRevenueCents-knownCostCents+refundMargin.knownRefundMarginImpactCents,
+      note:"Sales grouped by sale date; returns by refund date. Adjusted known-cost margin excludes sales and returns with missing historical costs; not full net profit."},
     refunds: {
       count: refunded._count._all,
       amountCents: refunded._sum.refundCents ?? 0,

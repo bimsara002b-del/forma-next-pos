@@ -12,6 +12,9 @@ type Report={
  shiftReconciliation:{limited:boolean;recent:{id:string;closedAt:string|null;openingFloatCents:number;cashSalesCents:number;cashInCents:number;cashOutCents:number;refundCents:number;otherCents:number;ledgerExpectedCents:number;recordedExpectedCents:number|null;countedCashCents:number|null;ledgerVarianceCents:number|null;matchesClosingSnapshot:boolean}[]};
  topProducts:{productId:string;name:string;quantity:number;revenueCents:number}[];
  refunds:{count:number;amountCents:number;netCashRevenueCents:number;note:string};
+ refundMargin:{knownCostLines:number;unknownCostLines:number;knownRefundCents:number;unknownRefundCents:number;
+  restockedCostRecoveryCents:number;knownRefundMarginImpactCents:number;totalLineRefundCents:number;
+  knownCostSalesMarginCents:number;adjustedKnownCostMarginCents:number;note:string};
  daily:{date:string;salesCount:number;revenueCents:number}[]|null;dailyChartComplete:boolean;
 };
 const dateToday=()=>sriLankaDate(new Date());
@@ -85,6 +88,10 @@ export function ReportsDashboard(){
    <div className="panel" style={{padding:20}}><h3>Profit coverage and inventory</h3>
     <p>Sales: {result.sales.count} · Known-cost lines: {result.margin.knownCostLineCount} · Missing-cost lines: {result.margin.unknownCostLineCount}</p>
     <p>Revenue on known-cost lines: {formatMoney(result.margin.coveredRevenueCents)} · Recorded costs: {formatMoney(result.margin.knownCostCents)}</p>
+    <p>Refund impact on known-cost margin: {formatMoney(result.refundMargin.knownRefundMarginImpactCents)} · Restocked historical cost recovery: {formatMoney(result.refundMargin.restockedCostRecoveryCents)}</p>
+    <p>Known-cost sales margin after known-cost refunds: {formatMoney(result.refundMargin.adjustedKnownCostMarginCents)}</p>
+    <p>Known-cost refund lines: {result.refundMargin.knownCostLines} · Unknown-cost refund lines: {result.refundMargin.unknownCostLines} · Refunds with unknown cost: {formatMoney(result.refundMargin.unknownRefundCents)}</p>
+    <p className="small-disclaimer">{result.refundMargin.note}</p>
     <p>Low-stock products: {result.inventory.lowStockProducts} · Products with unknown cost: {result.inventory.unknownCostProducts}</p>
     <p>Closed shifts: {result.closedShifts.count} · Net counted variance: {formatMoney(result.closedShifts.netCashVarianceCents)}</p>
     <p>Cash refunds recorded: {result.refunds.count} · Refunded amount: {formatMoney(result.refunds.amountCents)}</p>
