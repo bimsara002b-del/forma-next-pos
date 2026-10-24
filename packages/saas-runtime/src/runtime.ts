@@ -59,6 +59,7 @@ export function createTenantRuntime(options: {
       // Business callback cannot run until live membership/assignment validation.
       await tx.$queryRaw`SELECT set_config('app.tenant_id', ${selection.tenantId}, true)`;
       const scope = await authorizeTenantScope(actor, selection, {
+        findTenant: id => tx.tenant.findUnique({ where: { id } }),
         findMembership: async (userId, tenantId) => {
           const m = await tx.tenantMembership.findUnique({
             where: { tenantId_userId: { tenantId, userId } },
