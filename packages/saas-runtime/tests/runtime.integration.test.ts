@@ -2,7 +2,9 @@ import { beforeAll, afterAll, describe, expect, it } from "vitest";
 import { Pool } from "pg";
 import { readFile } from "node:fs/promises";
 import { createTenantRuntime } from "../src/runtime";
-import { createSessionCredential } from "../src/session";
+import { createSessionCredential,hashSessionToken } from "../src/session";
+import { createPgIdentitySessionWriter } from "../src/identity-db-writer";
+import { issueVerifiedSession } from "../src/identity-lifecycle";
 const adminUrl=process.env.SAAS_TEST_ADMIN_URL, appUrl=process.env.SAAS_TEST_APP_URL;
 const A="11111111-1111-1111-1111-111111111111", B="22222222-2222-2222-2222-222222222222";
 const user="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", stranger="bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
@@ -28,10 +30,16 @@ describe.skipIf(!adminUrl&&!appUrl)("Prisma 7 restricted-role tenant transaction
   admin=new Pool({connectionString:testUrl(adminUrl),max:1});testUrl(appUrl);
   if((await admin.query("SELECT to_regnamespace('forma_saas') AS schema")).rows[0].schema)
    throw new Error("Requires empty database; refusing to modify existing schema");
-  for(const file of ["20261023_000001_tenant_foundation","20261024_000002_member_assignments","20261024_000003_revocable_sessions"])
+  for(const file of ["20261023_000001_tenant_foundation","20261024_000002_member_assignments","20261024_000003_revocable_sessions","20261024_000004_identity_functions"])
    await admin.query(await readFile(new URL(`../../../prisma/saas/migrations/${file}/migration.sql`,import.meta.url),"utf8"));
   await admin.query(`
    CREATE ROLE forma_runtime_test LOGIN PASSWORD 'runtime-test-only' NOSUPERUSER NOBYPASSRLS;
+   CREATE ROLE forma_identity_test LOGIN PASSWORD 'identity-test-only' NOSUPERUSER NOBYPASSRLS;
+   GRANT USAGE ON SCHEMA forma_saas TO forma_identity_test;
+   GRANT EXECUTE ON FUNCTION forma_saas.identity_issue_session(uuid,text,timestamptz,timestamptz) TO forma_identity_test;
+   GRANT EXECUTE ON FUNCTION forma_saas.identity_revoke_hash(text) TO forma_identity_test;
+   GRANT EXECUTE ON FUNCTION forma_saas.identity_revoke_user(uuid) TO forma_identity_test;
+   GRANT EXECUTE ON FUNCTION forma_saas.identity_disable_user(uuid) TO forma_identity_test;
    GRANT USAGE ON SCHEMA forma_saas TO forma_runtime_test;
    GRANT SELECT ON forma_saas.tenant_membership,forma_saas.member_branch,forma_saas.member_register,
     forma_saas.branch,forma_saas.register,forma_saas.product,
@@ -169,6 +177,37 @@ describe.skipIf(!adminUrl&&!appUrl)("Prisma 7 restricted-role tenant transaction
    .rejects.toThrow();
  });
 
+ it("M30 identity writer uses a distinct role, stores hashes, and disables sessions atomically",async()=>{
+  const identityUrl="postgresql://forma_identity_test:identity-test-only@127.0.0.1:5432/forma_saas_runtime_test";
+  const writer=createPgIdentitySessionWriter({connectionString:identityUrl,maxConnections:1});
+  const probe=new Pool({connectionString:identityUrl,max:1});
+  const tenantProbe=new Pool({connectionString:appUrl!,max:1});
+  const issued=createSessionCredential();
+  try{
+   await expect(probe.query("SELECT * FROM forma_saas.app_session")).rejects.toThrow();
+   await expect(probe.query("INSERT INTO forma_saas.app_session(token_hash,user_id,expires_at) VALUES ($1,$2,now())",[issued.tokenHash,user])).rejects.toThrow();
+   await expect(tenantProbe.query("SELECT forma_saas.identity_disable_user($1::uuid)",[user])).rejects.toThrow();
+   const created=await issueVerifiedSession(writer,{userId:user,verifiedAt:new Date(),authenticationMethod:"passkey"});
+   const hash=createSessionCredential();
+   expect(created.token).toMatch(/^[0-9a-f]{64}$/);
+   const sessionsForUser=await admin.query("SELECT token_hash FROM forma_saas.app_session WHERE user_id=$1 AND token_hash=$2",[user,hashSessionToken(created.token)]);
+   expect(sessionsForUser.rowCount).toBe(1);
+   await writer.create({userId:user,tokenHash:issued.tokenHash,createdAt:new Date(),expiresAt:new Date(Date.now()+60000)});
+   expect(await writer.revokeHash({tokenHash:issued.tokenHash,revokedAt:new Date()})).toBe(1);
+   expect(await writer.revokeHash({tokenHash:issued.tokenHash,revokedAt:new Date()})).toBe(0);
+   expect(await writer.revokeUser({userId:user,revokedAt:new Date()})).toBeGreaterThanOrEqual(1);
+   const extra=await issueVerifiedSession(writer,{userId:user,verifiedAt:new Date(),authenticationMethod:"external-oidc"});
+   expect(extra.token).toBeTruthy();
+   expect(await writer.disableAccount(user)).toBeGreaterThanOrEqual(1);
+   await expect(issueVerifiedSession(writer,{userId:user,verifiedAt:new Date(),authenticationMethod:"passkey"})).rejects.toThrow();
+   const revoked=await admin.query("SELECT count(*)::int AS count FROM forma_saas.app_session WHERE user_id=$1 AND revoked_at IS NULL",[user]);
+   expect(revoked.rows[0].count).toBe(0);
+  }finally{
+   await admin.query("UPDATE forma_saas.app_user SET status='ACTIVE' WHERE id=$1",[user]);
+   await admin.query("UPDATE forma_saas.app_session SET revoked_at=NULL WHERE token_hash=$1",[credential.tokenHash]);
+   await writer.close();await probe.end();await tenantProbe.end();
+  }
+ });
  it("rejects a pool carrying non-local session context",async()=>{
   const dirty=createTenantRuntime({connectionString:appUrl!,readSessionToken:async()=>credential.token,poolSize:1});
   try {
