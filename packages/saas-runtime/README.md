@@ -128,3 +128,18 @@ The opt-in 000005 SQL introduces issuer/client/subject links and SECURITY DEFINE
 ## M30-06 provider identity PostgreSQL integration (Draft)
 
 CI now applies opt-in migration 000005 to the **disposable local PostgreSQL** integration database. A dedicated login writer role receives only the provider session issuance function; a separate privileged identity admin role receives only the unlink function. Neither role is granted direct provider link table reads. Tests cover linked/unknown/revoked/disabled identities, denied tenant role invocations and concurrent issue/unlink operations that must leave zero unrevoked sessions. This test suite is NOT a production login, and no migrations have been run against merchant databases. Function ownership, permission provisioning, provider signature verification, account provisioning/reassignment, browser routes, CSRF and end-to-end QA remain review gates.
+
+## M30 provider account immutability audit (draft)
+
+New additive opt-in migration 000006 disallows reassigning issuer, client ID,
+subject or linked user on a provider_identity record. To avoid a stale first
+read during concurrency, the trusted issue function rechecks the locked
+user ID before inserting a session; unlink aborts if the account mapping
+changed before the update. Existing migrations 000001–000005 are unchanged.
+
+The Prisma 7 schema now models ProviderIdentity for client generation,
+but no route can read provider identity: FORCE RLS has **no visibility policy**
+and ordinary runtime roles lack privileges. Unit/real PostgreSQL CI must pass.
+No identity provisioning UI, OIDC token exchange or public SaaS login exists.
+A privileged table owner can delete/reprovision links; audit and provisioning
+policies remain future release blockers.
