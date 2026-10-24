@@ -96,6 +96,17 @@ describe.skipIf(!adminUrl&&!appUrl)("Prisma 7 restricted-role tenant transaction
   await admin.query("DELETE FROM forma_saas.member_register WHERE membership_id=$1",[memberA]);
   await expect(runtime.withTenant(selection,async()=>true)).rejects.toMatchObject({reason:"FORBIDDEN"});
  });
+ it("blocks suspended tenant checkout while preserving authorized catalog reads",async()=>{
+  const selection={tenantId:A,branchId:branchA,registerId:registerA,capability:"checkout.create" as const};
+  await admin.query("UPDATE forma_saas.tenant SET status='SUSPENDED' WHERE id=$1",[A]);
+  try{
+   await expect(runtime.withTenant(selection,async()=>true)).rejects.toMatchObject({reason:"FORBIDDEN"});
+   expect((await runtime.listProducts(A)).map(p=>p.sku)).toEqual(["A"]);
+   expect((await runtime.listProducts(B)).map(p=>p.sku)).toEqual(["B"]);
+  }finally{
+   await admin.query("UPDATE forma_saas.tenant SET status='TRIALING' WHERE id=$1",[A]);
+  }
+ });
  it("denies membership revoked after session authentication",async()=>{
   await admin.query("UPDATE forma_saas.tenant_membership SET status='REVOKED' WHERE id=$1",[memberA]);
   try {await expect(runtime.listProducts(A)).rejects.toMatchObject({reason:"FORBIDDEN"});}
