@@ -94,7 +94,11 @@ describe.skipIf(!adminUrl&&!appUrl)("Prisma 7 restricted-role tenant transaction
   const selection={tenantId:A,branchId:branchA,registerId:registerA,capability:"checkout.create" as const};
   expect(await runtime.withTenant(selection,async(_tx,scope)=>scope.registerId)).toBe(registerA);
   await admin.query("DELETE FROM forma_saas.member_register WHERE membership_id=$1",[memberA]);
-  await expect(runtime.withTenant(selection,async()=>true)).rejects.toMatchObject({reason:"FORBIDDEN"});
+  try {
+   await expect(runtime.withTenant(selection,async()=>true)).rejects.toMatchObject({reason:"FORBIDDEN"});
+  } finally {
+   await admin.query("INSERT INTO forma_saas.member_register(tenant_id,membership_id,branch_id,register_id) VALUES ($1,$2,$3,$4)",[A,memberA,branchA,registerA]);
+  }
  });
  it("blocks suspended tenant checkout while preserving authorized catalog reads",async()=>{
   const selection={tenantId:A,branchId:branchA,registerId:registerA,capability:"checkout.create" as const};
