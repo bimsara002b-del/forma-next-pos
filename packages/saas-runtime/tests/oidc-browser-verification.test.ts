@@ -37,14 +37,9 @@ function signedToken(nonce: string) {
 describe("M30 browser-bound identity verification composition", () => {
   it("verifies a bound callback once using the consumed nonce", async () => {
     const s = store();
-    const begin = await beginBrowserOidc(config, s.api, now.getTime());
-    const state = new URL(begin.authorizationUrl).searchParams.get("state")!;
-    const query = new URLSearchParams({ state, code: "valid-code" });
     const transport = vi.fn(async (_url: string, init: RequestInit) => {
       const form = new URLSearchParams(init.body as URLSearchParams);
       expect(form.get("code_verifier")).toMatch(/^[\w-]{43}$/);
-      const stored = Array.from((s as unknown as { api: FlowStore }).api ? [state] : []);
-      expect(stored).toHaveLength(1);
       return new Response(JSON.stringify({
         id_token: signedToken(expectedNonce), access_token: "test-access", token_type: "Bearer"
       }), { headers: { "content-type": "application/json" } });
@@ -55,7 +50,6 @@ describe("M30 browser-bound identity verification composition", () => {
       create: async flow => { expectedNonce = flow.nonce; await s.api.create(flow); },
       consume: hash => s.api.consume(hash)
     };
-    // Re-run on a fresh flow with nonce captured via trusted storage.
     const newBegin = await beginBrowserOidc(config, wrapped, now.getTime());
     const newState = new URL(newBegin.authorizationUrl).searchParams.get("state")!;
     const validQuery = new URLSearchParams({ state: newState, code: "valid-code" });
