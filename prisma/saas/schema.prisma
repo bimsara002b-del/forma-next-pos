@@ -22,6 +22,7 @@ model AppUser {
   createdAt       DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
   memberships     TenantMembership[]
   sessions        AppSession[]
+  providerIdentities ProviderIdentity[]
 
   @@map("app_user")
   @@schema("forma_saas")
@@ -235,5 +236,23 @@ model AppSession {
   @@index([userId])
   @@index([expiresAt])
   @@map("app_session")
+  @@schema("forma_saas")
+}
+
+
+// Pre-provisioned exact OIDC subject mapping (NOT an email lookup).
+// PostgreSQL RLS, immutable binding trigger and privileged SQL functions
+// are specified in hand-authored migrations 000005 and 000006 only.
+model ProviderIdentity {
+  issuer String
+  clientId String @map("client_id")
+  subject String
+  userId String @map("user_id") @db.Uuid
+  status String @default("ACTIVE")
+  linkedAt DateTime @default(now()) @map("linked_at") @db.Timestamptz(6)
+  user AppUser @relation(fields:[userId],references:[id],onDelete:Restrict)
+  @@id([issuer,clientId,subject])
+  @@index([userId])
+  @@map("provider_identity")
   @@schema("forma_saas")
 }

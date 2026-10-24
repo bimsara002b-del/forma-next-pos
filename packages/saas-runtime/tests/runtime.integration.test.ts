@@ -30,7 +30,7 @@ describe.skipIf(!adminUrl&&!appUrl)("Prisma 7 restricted-role tenant transaction
   admin=new Pool({connectionString:testUrl(adminUrl),max:1});testUrl(appUrl);
   if((await admin.query("SELECT to_regnamespace('forma_saas') AS schema")).rows[0].schema)
    throw new Error("Requires empty database; refusing to modify existing schema");
-  for(const file of ["20261023_000001_tenant_foundation","20261024_000002_member_assignments","20261024_000003_revocable_sessions","20261024_000004_identity_functions","20261024_000005_provider_identity"])
+  for(const file of ["20261023_000001_tenant_foundation","20261024_000002_member_assignments","20261024_000003_revocable_sessions","20261024_000004_identity_functions","20261024_000005_provider_identity","20261024_000006_provider_identity_immutability"])
    await admin.query(await readFile(new URL(`../../../prisma/saas/migrations/${file}/migration.sql`,import.meta.url),"utf8"));
   await admin.query(`
    CREATE ROLE forma_runtime_test LOGIN PASSWORD 'runtime-test-only' NOSUPERUSER NOBYPASSRLS;
@@ -299,6 +299,36 @@ describe.skipIf(!adminUrl&&!appUrl)("Prisma 7 restricted-role tenant transaction
     await admin.query("DELETE FROM forma_saas.provider_identity WHERE user_id=$1",[linked]);
     await admin.query("DELETE FROM forma_saas.app_user WHERE id=$1",[linked]);
     await writer.close();await unlinkPool.end();
+  }
+ });
+ it("M30 provider identity keys and account links cannot be reassigned",async()=>{
+  const first="eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee";
+  const second="ffffffff-ffff-ffff-ffff-ffffffffffff";
+  const issuer="https://login.example.test/tenant",clientId="forma-oidc",subject="fixed-owner-subject";
+  const writer=createPgIdentitySessionWriter({
+   connectionString:"postgresql://forma_identity_test:identity-test-only@127.0.0.1:5432/forma_saas_runtime_test",maxConnections:1
+  });
+  const token=createSessionCredential();
+  try{
+   await admin.query("INSERT INTO forma_saas.app_user(id,email_normalized) VALUES ($1,$2),($3,$4)",
+    [first,"immutable-first@example.test",second,"immutable-second@example.test"]);
+   await admin.query("INSERT INTO forma_saas.provider_identity(issuer,client_id,subject,user_id) VALUES ($1,$2,$3,$4)",
+    [issuer,clientId,subject,first]);
+   await expect(admin.query("UPDATE forma_saas.provider_identity SET user_id=$1 WHERE issuer=$2 AND client_id=$3 AND subject=$4",
+    [second,issuer,clientId,subject])).rejects.toThrow("PROVIDER_IDENTITY_IMMUTABLE");
+   await expect(admin.query("UPDATE forma_saas.provider_identity SET subject=$1 WHERE issuer=$2 AND client_id=$3 AND subject=$4",
+    ["rewritten-subject",issuer,clientId,subject])).rejects.toThrow("PROVIDER_IDENTITY_IMMUTABLE");
+   expect(await writer.issueProviderSession({
+    issuer,clientId,subject,tokenHash:token.tokenHash,createdAt:new Date(),expiresAt:new Date(Date.now()+60000)
+   })).toBe(first);
+   const saved=await admin.query("SELECT user_id FROM forma_saas.app_session WHERE token_hash=$1",[token.tokenHash]);
+   expect(saved.rows[0].user_id).toBe(first);
+   expect(saved.rows[0].user_id).not.toBe(second);
+  }finally{
+   await admin.query("DELETE FROM forma_saas.app_session WHERE user_id=$1",[first]);
+   await admin.query("DELETE FROM forma_saas.provider_identity WHERE user_id=$1",[first]);
+   await admin.query("DELETE FROM forma_saas.app_user WHERE id IN ($1,$2)",[first,second]);
+   await writer.close();
   }
  });
  it("rejects a pool carrying non-local session context",async()=>{
