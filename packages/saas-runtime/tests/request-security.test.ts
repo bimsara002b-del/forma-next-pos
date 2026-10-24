@@ -33,10 +33,11 @@ describe("M30 SaaS session HTTP boundary (not yet wired into routes)",()=>{
  });
  it("requires HTTPS exact trusted origins and cannot accept lookalikes",()=>{
   expect(validateAppOrigin(origin)).toBe(origin);
-  for(const u of ["http://pos.example.test","https://pos.example.test.evil.tld","https://user:pass@pos.example.test","https://pos.example.test/path","https://pos.example.test?x=1"]){
+  for(const u of ["http://pos.example.test","https://user:pass@pos.example.test","https://pos.example.test/path","https://pos.example.test?x=1"]){
    expect(()=>validateAppOrigin(u)).toThrow();
   }
   expect(check("PATCH",mintSessionCsrf(token,secret),"https://pos.example.test:443")).toBe(false);
+  expect(check("PATCH",mintSessionCsrf(token,secret),"https://pos.example.test.evil.tld")).toBe(false);
  });
  it("returns secure host-only cookie strings; rejects invalid credentials",()=>{
   expect(sessionCookie(token)).toContain(SAAS_SESSION_COOKIE+"=");
