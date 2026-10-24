@@ -143,3 +143,8 @@ PostgreSQL CI job exercises real adapter pooling, tenant isolation and rollback.
 See [runtime setup and security contract](packages/saas-runtime/README.md).
 Existing root Prisma 6 / SQLite routes are unchanged. This is not a production
 cutover; session-provider wiring and complete financial migration remain pending.
+
+
+## POS Reporting — Sri Lanka business-day fix (Draft PR)
+
+The single-store demo reports use **Asia/Colombo business dates** (UTC+05:30) rather than UTC dates. Database timestamps remain UTC; reporting window SQL boundaries, daily sales buckets and browser date pickers are translated consistently, including midnight edge cases. Reports surface existing cash-refund counts/amounts and **period gross sales less refunds** in a clearly labeled KPI. Refunds and sales use their own transaction dates: this metric is not drawer cash, net profit, accounting reconciliation or VAT treatment. Only dates in the current post-2006 Sri Lanka +05:30 civil-time regime are supported by the fixed-offset helper. CI unit tests cover local midnight, rollovers and default dates. No database schema changes, financial recomputation or live migrations.
