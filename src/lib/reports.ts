@@ -1,12 +1,13 @@
 import { PrismaClient } from "@prisma/client";
+import { sriLankaDate, dateDaysBefore, COLOMBO_OFFSET_MS, REPORT_TIMEZONE } from "./report-calendar";
 
 export type ReportingWindow = { from: Date; toExclusive: Date; fromDate: string; toDate: string };
 export class ReportInputError extends Error {}
 const DAY_MS = 86_400_000;
 
 export function parseReportWindow(fromParam: string | null, toParam: string | null, today = new Date()): ReportingWindow {
-  const todayDate = today.toISOString().slice(0, 10);
-  const fromDefault = new Date(Date.parse(todayDate + "T00:00:00Z") - 29 * DAY_MS).toISOString().slice(0, 10);
+  const todayDate = sriLankaDate(today);
+  const fromDefault = dateDaysBefore(todayDate, 29);
   const fromDate = fromParam ?? fromDefault, toDate = toParam ?? todayDate;
   const dateRe = /^\d{4}-\d{2}-\d{2}$/;
   if (!dateRe.test(fromDate) || !dateRe.test(toDate)) throw new ReportInputError("Invalid date. Use YYYY-MM-DD.");
@@ -21,17 +22,17 @@ export function parseReportWindow(fromParam: string | null, toParam: string | nu
   if (toMs < fromMs || (toMs - fromMs) / DAY_MS >= 90) {
     throw new ReportInputError("Select 1–90 calendar days in chronological order.");
   }
-  return { from: new Date(fromMs), toExclusive: new Date(toMs + DAY_MS), fromDate, toDate };
+  return { from: new Date(fromMs - COLOMBO_OFFSET_MS), toExclusive: new Date(toMs + DAY_MS - COLOMBO_OFFSET_MS), fromDate, toDate };
 }
 type HistorySale = { createdAt: Date; totalCents: number };
-export function salesByUtcDay(sales: HistorySale[], window: ReportingWindow) {
+export function salesBySriLankaDay(sales: HistorySale[], window: ReportingWindow) {
   const result = new Map<string, { date: string; salesCount: number; revenueCents: number }>();
-  for (let time = window.from.getTime(); time < window.toExclusive.getTime(); time += DAY_MS) {
+  for (let time = window.from.getTime() + COLOMBO_OFFSET_MS; time < window.toExclusive.getTime() + COLOMBO_OFFSET_MS; time += DAY_MS) {
     const date = new Date(time).toISOString().slice(0, 10);
     result.set(date, { date, salesCount: 0, revenueCents: 0 });
   }
   for (const sale of sales) {
-    const date = sale.createdAt.toISOString().slice(0, 10);
+    const date = sriLankaDate(sale.createdAt);
     const bucket = result.get(date);
     if (bucket) { bucket.salesCount += 1; bucket.revenueCents += sale.totalCents; }
   }
@@ -89,7 +90,7 @@ export async function generateReports(db: PrismaClient, window: ReportingWindow)
   }, { lowStockProducts: 0, knownCostStockUnits: 0, knownCostValuationCents: 0, unknownCostProducts: 0 });
 
   return {
-    period: { from: window.fromDate, to: window.toDate, timezone: "UTC" },
+    period: { from: window.fromDate, to: window.toDate, timezone: REPORT_TIMEZONE },
     sales: {
       count: saleTotals._count._all,
       revenueCents: saleTotals._sum.totalCents ?? 0,
@@ -120,7 +121,7 @@ export async function generateReports(db: PrismaClient, window: ReportingWindow)
       productId: item.productId, name: item.productName,
       quantity: item._sum.quantity ?? 0, revenueCents: item._sum.lineTotalCents ?? 0
     })),
-    daily: dailyComplete ? salesByUtcDay(dailySalesLimited, window) : null,
+    daily: dailyComplete ? salesBySriLankaDay(dailySalesLimited, window) : null,
     dailyChartComplete: dailyComplete
   };
 }
