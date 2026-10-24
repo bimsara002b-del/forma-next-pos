@@ -102,3 +102,10 @@ runtime and leaves stored sessions/tables and protective RLS intact; it does not
 run DROP or disable RLS. No live migration was executed.
 
 Security reference: https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html
+
+
+## M29 draft — trusted identity lifecycle boundary
+
+The optional `identity-lifecycle.ts` module defines a **server-only application contract** to issue sessions after a fresh external OIDC or passkey verification assertion (no older than five minutes) and to revoke one/all session digests. It generates a new random opaque token and sends **only its hash** to a caller-supplied isolated writer; it never returns a token after writer failure. Unit tests cover validation, expiry, storage failure and revocation.
+
+**Not a live login service:** the module cannot independently verify an OIDC ID token/passkey, confirm account active status, prevent forged `VerifiedIdentity` assertions, perform session rotation or atomic account disable/revocation. The caller must enforce these protections and provide a DB-backed writer isolated from the restricted tenant runtime role. The session write contract is NOT exposed to clients, routes, or existing SQLite login. Add a hardened verified provider, scoped identity database permissions, transactional SQL, and PostgreSQL integration tests before issuing live credentials. Do not deploy or migrate merchant data.
