@@ -1,4 +1,4 @@
-# M27 — isolated Prisma 7 PostgreSQL runtime
+# M28 — revocable database sessions for the isolated SaaS runtime
 
 This private server package validates/generates the SaaS schema with pinned Prisma
 7.10.1 and adapter-pg, without replacing root Prisma 6 or the SQLite POS runtime.
@@ -23,9 +23,11 @@ fixtures and a restricted login; CI discards the service after the job.
 
 ## Security contract
 
-- Supply a server-owned resolveSession callback that authenticates the user and
-  checks account/session revocation on every call. It must never trust actor IDs
-  from request parameters. This package does not implement that login provider.
+- Prefer `readSessionToken` to resolve a stored opaque session and ACTIVE account
+  inside the same guarded transaction, before tenant/membership checks. The
+  alternate `resolveSession` contract remains for independently verified identity
+  providers and tests. Exactly one session source is required; neither may trust
+  actor IDs from request parameters. This package is not a login provider.
 - withTenant sets transaction-local RLS context ONLY to bootstrap membership
   lookup, then reloads membership/branch/register assignments and applies M26
   authorization before invoking trusted DAL code. The GUC is not authentication.
@@ -52,9 +54,51 @@ CI tests apply migrations only to the new empty service database.
 Rollback for this opt-in package is to stop importing it/revert the app change;
 leave assignment tables/data intact. No destructive down migration is provided.
 The existing SQLite database is unaffected. Before any cutover, implement the
-real session resolver, full sale/refund/shift/purchase schema and DAL, tenant
+maintained login provider and cookie adapter, full sale/refund/shift/purchase schema and DAL, tenant
 status rules, migration reconciliation/import dry run, backup restore and
 application/hardware acceptance. M27 does not make the live POS multi-tenant.
 
 References: https://www.prisma.io/docs/orm/v7/core-concepts/supported-databases/postgresql
 and https://www.prisma.io/docs/orm/v7/reference/prisma-config-reference
+
+## M28 session verification and rollout contract
+
+`readSessionToken` must read the dedicated `__Host-forma_saas_session` cookie from
+**the current server request on each call**. Do not capture a user's token in a
+module singleton. Use the exported secure/HttpOnly/SameSite=Lax/Path=/ cookie
+options over HTTPS, with no Domain attribute. Never accept user/role/tenant claims
+from that cookie. Missing, malformed, unknown, expired, revoked or disabled-account
+sessions fail closed; missing membership is still forbidden after authentication.
+Legacy demo/staff cookies are intentionally not accepted by this path.
+
+`createSessionCredential` generates a random 256-bit token and SHA-256 digest.
+Only its digest belongs in `app_session`; return the token only as the secure
+cookie after successful login. Session lifetime is capped at eight hours by SQL.
+The resolver uses database time and never caches identity. Every request rechecks
+session, account and membership/assignments. Already-running transactions are not
+cancelled by concurrent revocation; stronger revocation locking is a future gate.
+
+Migration 000003 adds `app_session` and enables FORCE RLS on the global `app_user`
+table. A runtime role needs SELECT on these two tables, in addition to M27 grants.
+No session/account writes are granted to it. Without the transaction-local hash,
+no identity rows are visible; with it, only the presented valid session and its
+ACTIVE user are visible. The hash is sensitive internal context: never return it
+from a DAL or log it. Trusted SQL and DB credentials remain a security boundary.
+
+A separate, reviewed identity service must provision sessions after verified login,
+revoke on logout/password reset, revoke all sessions atomically when disabling an
+account (so re-enable cannot resurrect old sessions), and rotate after login or
+privilege elevation. Its narrowly scoped DB provisioning grants are **not** added
+here. The legacy POS cannot safely serve as this SaaS identity issuer. Auth.js or
+another maintained provider still needs selection/integration, cookie transport,
+CSRF/origin checks, throttling, audit, idle timeout, MFA/recovery and browser tests.
+There is no public login/logout endpoint or route cutover in M28.
+
+Validation includes real restricted-role PostgreSQL tests for opaque token lookup,
+wrong user, forged token, hash replay, expiry, revocation, disabled account, identity
+RLS, denied session creation, pooled context cleanup and maximum lifetime. The
+SQL rollback suite includes the session migration. Rollback stops using the opt-in
+runtime and leaves stored sessions/tables and protective RLS intact; it does not
+run DROP or disable RLS. No live migration was executed.
+
+Security reference: https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html
