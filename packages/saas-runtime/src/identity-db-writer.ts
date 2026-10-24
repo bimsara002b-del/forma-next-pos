@@ -2,6 +2,11 @@ import { Pool, type PoolClient } from "pg";
 import type { SessionWriter } from "./identity-lifecycle";
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DIGEST=/^[0-9a-f]{64}$/;
+/** OIDC client IDs are opaque strings, but cannot contain whitespace/control chars. */
+export function validProviderClientId(value: unknown): value is string {
+ return typeof value==="string" && value.length>=3 && value.length<=256 &&
+  !/[\s\x00-\x1f]/.test(value);
+}
 export type IdentitySessionWriter=SessionWriter & {
  issueProviderSession(args:{issuer:string;clientId:string;subject:string;tokenHash:string;createdAt:Date;expiresAt:Date}):Promise<string>;
  disableAccount(userId:string):Promise<number>;
@@ -42,9 +47,8 @@ export function createPgIdentitySessionWriter(config:{
    try{uri=new URL(issuer);}catch{throw Error("INVALID_PROVIDER_SESSION");}
    if(uri.protocol!=="https:"||uri.href!==issuer||uri.username||uri.password||
      uri.search||uri.hash||issuer.length>512||
-     typeof clientId!=="string"||clientId.length<3||clientId.length>256||
+     !validProviderClientId(clientId)||
      typeof subject!=="string"||!subject.length||subject.length>255||
-     /[\\s\\x00-\\x1f]/.test(clientId)||
      [...subject].some(ch=>ch.charCodeAt(0)<32||ch.charCodeAt(0)===127)||
      !DIGEST.test(tokenHash)||
      !(createdAt instanceof Date)||!Number.isFinite(createdAt.getTime())||
