@@ -1,5 +1,6 @@
 import type { SessionWriter } from "./identity-lifecycle";
-import { SAAS_SESSION_COOKIE, hashSessionToken } from "./session";
+import { hashSessionToken } from "./session";
+import { readSaasSessionCookie } from "./saas-request-session";
 import { expiredSessionCookie, verifySaasMutationRequest } from "./request-security";
 
 type LogoutRequest = { method: string; headers: Pick<Headers, "get"> };
@@ -10,14 +11,7 @@ const LOGOUT_ERROR = "SAAS_LOGOUT_REJECTED";
  * Reject cookie shadowing (including repeated same-name cookies) and malformed
  * credentials; neither user IDs nor hashes supplied by the browser are trusted.
  */
-export function readLogoutSessionCookie(header: string | null): string | null {
-  if (!header || header.length > 8192) return null;
-  const candidates = header.split(";").map(part => part.trim())
-    .filter(part => part.startsWith(SAAS_SESSION_COOKIE + "="))
-    .map(part => part.slice(SAAS_SESSION_COOKIE.length + 1));
-  if (candidates.length !== 1 || !/^[0-9a-f]{64}$/.test(candidates[0])) return null;
-  return candidates[0];
-}
+export const readLogoutSessionCookie = readSaasSessionCookie;
 
 /** Opt-in M30 logout boundary; NOT an active Next.js route.
  * The caller must pass only trusted expectedOrigin/CSRF secret and a dedicated
