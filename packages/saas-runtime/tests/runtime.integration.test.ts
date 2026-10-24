@@ -51,7 +51,10 @@ describe.skipIf(!adminUrl&&!appUrl)("Prisma 7 restricted-role tenant transaction
    GRANT EXECUTE ON FUNCTION forma_saas.oidc_flow_begin(text,text,text,text,timestamptz) TO forma_oidc_flow_test;
    GRANT EXECUTE ON FUNCTION forma_saas.oidc_flow_consume(text) TO forma_oidc_flow_test;
    GRANT USAGE ON SCHEMA forma_saas TO forma_runtime_test;
-   GRANT SELECT ON forma_saas.tenant_membership,forma_saas.member_branch,forma_saas.member_register,
+   -- Tenant lifecycle guard needs READ access to the tenant row; FORCE RLS
+   -- still confines visibility to the transaction-local verified tenant.
+   GRANT SELECT ON forma_saas.tenant,forma_saas.tenant_membership,
+    forma_saas.member_branch,forma_saas.member_register,
     forma_saas.branch,forma_saas.register,forma_saas.product,
     forma_saas.app_session,forma_saas.app_user TO forma_runtime_test;
    GRANT INSERT ON forma_saas.product TO forma_runtime_test;
@@ -94,12 +97,42 @@ describe.skipIf(!adminUrl&&!appUrl)("Prisma 7 restricted-role tenant transaction
   const selection={tenantId:A,branchId:branchA,registerId:registerA,capability:"checkout.create" as const};
   expect(await runtime.withTenant(selection,async(_tx,scope)=>scope.registerId)).toBe(registerA);
   await admin.query("DELETE FROM forma_saas.member_register WHERE membership_id=$1",[memberA]);
-  await expect(runtime.withTenant(selection,async()=>true)).rejects.toMatchObject({reason:"FORBIDDEN"});
+  try {
+   await expect(runtime.withTenant(selection,async()=>true)).rejects.toMatchObject({reason:"FORBIDDEN"});
+  } finally {
+   await admin.query("INSERT INTO forma_saas.member_register(tenant_id,membership_id,branch_id,register_id) VALUES ($1,$2,$3,$4)",[A,memberA,branchA,registerA]);
+  }
+ });
+ it("blocks suspended tenant checkout while preserving authorized catalog reads",async()=>{
+  const selection={tenantId:A,branchId:branchA,registerId:registerA,capability:"checkout.create" as const};
+  await admin.query("UPDATE forma_saas.tenant SET status='SUSPENDED' WHERE id=$1",[A]);
+  try{
+   await expect(runtime.withTenant(selection,async()=>true)).rejects.toMatchObject({reason:"FORBIDDEN"});
+   expect((await runtime.listProducts(A)).map(p=>p.sku)).toEqual(["A"]);
+   expect((await runtime.listProducts(B)).map(p=>p.sku)).toEqual(["B"]);
+  }finally{
+   await admin.query("UPDATE forma_saas.tenant SET status='TRIALING' WHERE id=$1",[A]);
+  }
  });
  it("denies membership revoked after session authentication",async()=>{
   await admin.query("UPDATE forma_saas.tenant_membership SET status='REVOKED' WHERE id=$1",[memberA]);
   try {await expect(runtime.listProducts(A)).rejects.toMatchObject({reason:"FORBIDDEN"});}
   finally {await admin.query("UPDATE forma_saas.tenant_membership SET status='ACTIVE' WHERE id=$1",[memberA]);}
+ });
+ it("tenant SELECT grant remains restricted by FORCE RLS",async()=>{
+  const raw=new Pool({connectionString:appUrl!,max:1});
+  try {
+   // SELECT is granted only to allow tenant-state checks inside trusted tx.
+   // With no transaction-local tenant, RLS must still return no rows.
+   expect((await raw.query("SELECT id,status FROM forma_saas.tenant")).rows).toEqual([]);
+   const onlyA=await runtime.withTenant({tenantId:A,capability:"products.read"},async tx=>
+    tx.tenant.findMany({select:{id:true,status:true},orderBy:{id:"asc"}}));
+   expect(onlyA.map(row=>row.id)).toEqual([A]);
+   const onlyB=await runtime.withTenant({tenantId:B,capability:"products.read"},async tx=>
+    tx.tenant.findMany({select:{id:true},orderBy:{id:"asc"}}));
+   expect(onlyB.map(row=>row.id)).toEqual([B]);
+   await expect(raw.query("UPDATE forma_saas.tenant SET status='ACTIVE'")).rejects.toThrow();
+  }finally{await raw.end();}
  });
  it("RLS prevents forged product reads and cross-tenant inserts",async()=>{
   expect(await runtime.withTenant({tenantId:A,capability:"products.read"},tx=>tx.product.findMany({where:{id:productB}}))).toEqual([]);

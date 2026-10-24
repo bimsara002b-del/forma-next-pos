@@ -5,9 +5,10 @@ import {
 } from "../src/lib/saas/authorize-tenant";
 
 const TENANT_A = "tenant-a", TENANT_B = "tenant-b";
-function store(membership: Membership | null, branchTenant=TENANT_A, registerTenant=TENANT_A): TenantScopeStore {
+function store(membership: Membership | null, branchTenant=TENANT_A, registerTenant=TENANT_A, status="ACTIVE"): TenantScopeStore {
   return {
     findMembership: async () => membership,
+    findTenant: async id => ({ id, status }),
     findBranch: async id => ({ id, tenantId: branchTenant, isActive: true }),
     findRegister: async id => ({ id, tenantId: registerTenant, branchId: "branch-a", isActive: true })
   };
@@ -34,6 +35,24 @@ describe("tenant authorization boundary (server-only contract)", () => {
       .rejects.toMatchObject({ reason: "FORBIDDEN" });
     await expect(authorizeTenantScope(alice, checkout, store({ ...assigned, role: "SUPER_ADMIN" })))
       .rejects.toMatchObject({ reason: "FORBIDDEN" });
+  });
+  it.each(["SUSPENDED", "CANCELLED"])("denies writes for %s tenant but permits authorized read", async status => {
+    const scoped=store(assigned,TENANT_A,TENANT_A,status);
+    await expect(authorizeTenantScope(alice,checkout,scoped)).rejects.toMatchObject({reason:"FORBIDDEN"});
+    await expect(authorizeTenantScope(alice,{tenantId:TENANT_A,capability:"products.read"},scoped))
+      .resolves.toMatchObject({tenantId:TENANT_A});
+  });
+  it.each(["TRIALING","ACTIVE","PAST_DUE","GRACE"])("allows role-permitted checkout in %s tenant", async status => {
+    await expect(authorizeTenantScope(alice,checkout,store(assigned,TENANT_A,TENANT_A,status)))
+      .resolves.toMatchObject({capability:"checkout.create"});
+  });
+  it("fails closed for unknown, missing or forged tenant status", async () => {
+    await expect(authorizeTenantScope(alice,checkout,store(assigned,TENANT_A,TENANT_A,"UNKNOWN")))
+      .rejects.toMatchObject({reason:"FORBIDDEN"});
+    const missing=store(assigned); missing.findTenant=async()=>null;
+    await expect(authorizeTenantScope(alice,checkout,missing)).rejects.toMatchObject({reason:"FORBIDDEN"});
+    const forged=store(assigned); forged.findTenant=async()=>({id:TENANT_B,status:"ACTIVE"});
+    await expect(authorizeTenantScope(alice,checkout,forged)).rejects.toMatchObject({reason:"FORBIDDEN"});
   });
   it("never inherits owner permissions from another tenant", async () => {
     await expect(authorizeTenantScope(alice, { tenantId: TENANT_A, capability: "staff.manage" }, store(assigned)))
