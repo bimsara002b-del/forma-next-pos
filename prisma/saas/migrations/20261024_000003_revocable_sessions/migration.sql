@@ -19,7 +19,7 @@ CREATE POLICY presented_session ON forma_saas.app_session FOR SELECT
 -- No runtime INSERT/UPDATE/DELETE policy: possession never grants session minting.
 ALTER TABLE forma_saas.app_user ENABLE ROW LEVEL SECURITY;
 ALTER TABLE forma_saas.app_user FORCE ROW LEVEL SECURITY;
-CREATE POLICY session_user ON forma_saas.app_user FOR SELECT
+CREATE POLICY authenticated_session_user ON forma_saas.app_user FOR SELECT
  USING (status = 'ACTIVE' AND EXISTS (
   SELECT 1 FROM forma_saas.app_session s WHERE s.user_id = app_user.id
   -- app_session RLS restricts this to the presented, unexpired, unrevoked session.
