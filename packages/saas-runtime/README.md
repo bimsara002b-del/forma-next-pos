@@ -123,3 +123,8 @@ Related: https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forge
 ## M30 provider identity atomicity (Draft)
 
 The opt-in 000005 SQL introduces issuer/client/subject links and SECURITY DEFINER atomic issue/unlink functions. Both use account-row locking before link-row locking; unlink revokes all user sessions. No PUBLIC grants, schema cutover, account linking endpoint or live provider login. Functions must be reviewed with PostgreSQL role/ownership and adversarial concurrent transaction tests before permissions or production use.
+
+
+## M30-06 provider identity PostgreSQL integration (Draft)
+
+CI now applies opt-in migration 000005 to the **disposable local PostgreSQL** integration database. A dedicated login writer role receives only the provider session issuance function; a separate privileged identity admin role receives only the unlink function. Neither role is granted direct provider link table reads. Tests cover linked/unknown/revoked/disabled identities, denied tenant role invocations and concurrent issue/unlink operations that must leave zero unrevoked sessions. This test suite is NOT a production login, and no migrations have been run against merchant databases. Function ownership, permission provisioning, provider signature verification, account provisioning/reassignment, browser routes, CSRF and end-to-end QA remain review gates.

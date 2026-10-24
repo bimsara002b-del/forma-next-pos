@@ -3,6 +3,7 @@ import type { SessionWriter } from "./identity-lifecycle";
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DIGEST=/^[0-9a-f]{64}$/;
 export type IdentitySessionWriter=SessionWriter & {
+ issueProviderSession(args:{issuer:string;clientId:string;subject:string;tokenHash:string;createdAt:Date;expiresAt:Date}):Promise<string>;
  disableAccount(userId:string):Promise<number>;
  close():Promise<void>;
 };
@@ -34,6 +35,31 @@ export function createPgIdentitySessionWriter(config:{
   }finally{client.release();}
  }
  return {
+  // Server-only DB-bound resolver + session insert. This does NOT verify OIDC
+  // signatures; only a reviewed trusted verifier may invoke the method.
+  async issueProviderSession({issuer,clientId,subject,tokenHash,createdAt,expiresAt}){
+   let uri:URL;
+   try{uri=new URL(issuer);}catch{throw Error("INVALID_PROVIDER_SESSION");}
+   if(uri.protocol!=="https:"||uri.href!==issuer||uri.username||uri.password||
+     uri.search||uri.hash||issuer.length>512||
+     typeof clientId!=="string"||clientId.length<3||clientId.length>256||
+     typeof subject!=="string"||!subject.length||subject.length>255||
+     /[\\s\\x00-\\x1f]/.test(clientId)||
+     [...subject].some(ch=>ch.charCodeAt(0)<32||ch.charCodeAt(0)===127)||
+     !DIGEST.test(tokenHash)||
+     !(createdAt instanceof Date)||!Number.isFinite(createdAt.getTime())||
+     !(expiresAt instanceof Date)||!Number.isFinite(expiresAt.getTime())||
+     expiresAt.getTime()<=createdAt.getTime()||expiresAt.getTime()-createdAt.getTime()>8*3600*1000)
+    throw Error("INVALID_PROVIDER_SESSION");
+   return authorized(async client=>{
+    const {rows}=await client.query<{user_id:string}>(
+     'SELECT forma_saas.identity_issue_provider_session($1::text,$2::text,$3::text,$4::text,$5::timestamptz,$6::timestamptz) AS user_id',
+     [issuer,clientId,subject,tokenHash,createdAt,expiresAt]);
+    const userId=rows[0]?.user_id;
+    if(!userId||!UUID.test(userId))throw Error("INVALID_PROVIDER_SESSION_RESULT");
+    return userId;
+   });
+  },
   async create({userId,tokenHash,createdAt,expiresAt}){
    if(!UUID.test(userId)||!DIGEST.test(tokenHash)||
     !Number.isFinite(createdAt.getTime())||!Number.isFinite(expiresAt.getTime()))

@@ -30,16 +30,20 @@ describe.skipIf(!adminUrl&&!appUrl)("Prisma 7 restricted-role tenant transaction
   admin=new Pool({connectionString:testUrl(adminUrl),max:1});testUrl(appUrl);
   if((await admin.query("SELECT to_regnamespace('forma_saas') AS schema")).rows[0].schema)
    throw new Error("Requires empty database; refusing to modify existing schema");
-  for(const file of ["20261023_000001_tenant_foundation","20261024_000002_member_assignments","20261024_000003_revocable_sessions","20261024_000004_identity_functions"])
+  for(const file of ["20261023_000001_tenant_foundation","20261024_000002_member_assignments","20261024_000003_revocable_sessions","20261024_000004_identity_functions","20261024_000005_provider_identity"])
    await admin.query(await readFile(new URL(`../../../prisma/saas/migrations/${file}/migration.sql`,import.meta.url),"utf8"));
   await admin.query(`
    CREATE ROLE forma_runtime_test LOGIN PASSWORD 'runtime-test-only' NOSUPERUSER NOBYPASSRLS;
    CREATE ROLE forma_identity_test LOGIN PASSWORD 'identity-test-only' NOSUPERUSER NOBYPASSRLS;
+   CREATE ROLE forma_identity_admin_test LOGIN PASSWORD 'identity-admin-test-only' NOSUPERUSER NOBYPASSRLS;
    GRANT USAGE ON SCHEMA forma_saas TO forma_identity_test;
    GRANT EXECUTE ON FUNCTION forma_saas.identity_issue_session(uuid,text,timestamptz,timestamptz) TO forma_identity_test;
    GRANT EXECUTE ON FUNCTION forma_saas.identity_revoke_hash(text) TO forma_identity_test;
    GRANT EXECUTE ON FUNCTION forma_saas.identity_revoke_user(uuid) TO forma_identity_test;
    GRANT EXECUTE ON FUNCTION forma_saas.identity_disable_user(uuid) TO forma_identity_test;
+   GRANT USAGE ON SCHEMA forma_saas TO forma_identity_admin_test;
+   GRANT EXECUTE ON FUNCTION forma_saas.identity_issue_provider_session(text,text,text,text,timestamptz,timestamptz) TO forma_identity_test;
+   GRANT EXECUTE ON FUNCTION forma_saas.identity_unlink_provider(text,text,text) TO forma_identity_admin_test;
    GRANT USAGE ON SCHEMA forma_saas TO forma_runtime_test;
    GRANT SELECT ON forma_saas.tenant_membership,forma_saas.member_branch,forma_saas.member_register,
     forma_saas.branch,forma_saas.register,forma_saas.product,
@@ -206,6 +210,95 @@ describe.skipIf(!adminUrl&&!appUrl)("Prisma 7 restricted-role tenant transaction
    await admin.query("UPDATE forma_saas.app_user SET status='ACTIVE' WHERE id=$1",[user]);
    await admin.query("UPDATE forma_saas.app_session SET revoked_at=NULL WHERE token_hash=$1",[credential.tokenHash]);
    await writer.close();await probe.end();await tenantProbe.end();
+  }
+ });
+ it("M30 provider SQL permits only prelinked active accounts with identity role grants",async()=>{
+  const linked="cccccccc-cccc-cccc-cccc-cccccccccccc";
+  const issuer="https://login.example.test/tenant",clientId="forma-oidc",subject="approved-opaque-subject";
+  const url="postgresql://forma_identity_test:identity-test-only@127.0.0.1:5432/forma_saas_runtime_test";
+  const writer=createPgIdentitySessionWriter({connectionString:url,maxConnections:2});
+  const rolePool=new Pool({connectionString:url,max:1});
+  const tenantPool=new Pool({connectionString:appUrl!,max:1});
+  const issued=createSessionCredential();
+  try{
+    await admin.query("INSERT INTO forma_saas.app_user(id,email_normalized) VALUES($1,$2)",[linked,"linked@example.test"]);
+    await admin.query("INSERT INTO forma_saas.provider_identity(issuer,client_id,subject,user_id) VALUES($1,$2,$3,$4)",
+      [issuer,clientId,subject,linked]);
+    await expect(rolePool.query("SELECT * FROM forma_saas.provider_identity")).rejects.toThrow();
+    await expect(tenantPool.query(
+      "SELECT forma_saas.identity_issue_provider_session($1,$2,$3,$4,now(),now()+interval '1 hour')",
+      [issuer,clientId,subject,createSessionCredential().tokenHash])).rejects.toThrow();
+    await expect(rolePool.query("SELECT forma_saas.identity_unlink_provider($1,$2,$3)",[issuer,clientId,subject])).rejects.toThrow();
+    await expect(writer.issueProviderSession({
+      issuer,clientId,subject:"wrong-subject",tokenHash:createSessionCredential().tokenHash,
+      createdAt:new Date(),expiresAt:new Date(Date.now()+60000)
+    })).rejects.toThrow();
+    const userId=await writer.issueProviderSession({
+      issuer,clientId,subject,tokenHash:issued.tokenHash,
+      createdAt:new Date(),expiresAt:new Date(Date.now()+60000)
+    });
+    expect(userId).toBe(linked);
+    const row=await admin.query("SELECT user_id,revoked_at FROM forma_saas.app_session WHERE token_hash=$1",[issued.tokenHash]);
+    expect(row.rows).toMatchObject([{user_id:linked,revoked_at:null}]);
+    await admin.query("UPDATE forma_saas.provider_identity SET status='REVOKED' WHERE issuer=$1 AND client_id=$2 AND subject=$3",
+      [issuer,clientId,subject]);
+    await expect(writer.issueProviderSession({
+      issuer,clientId,subject,tokenHash:createSessionCredential().tokenHash,
+      createdAt:new Date(),expiresAt:new Date(Date.now()+60000)
+    })).rejects.toThrow();
+    await admin.query("UPDATE forma_saas.provider_identity SET status='ACTIVE' WHERE issuer=$1 AND client_id=$2 AND subject=$3",
+      [issuer,clientId,subject]);
+    await admin.query("UPDATE forma_saas.app_user SET status='DISABLED' WHERE id=$1",[linked]);
+    await expect(writer.issueProviderSession({
+      issuer,clientId,subject,tokenHash:createSessionCredential().tokenHash,
+      createdAt:new Date(),expiresAt:new Date(Date.now()+60000)
+    })).rejects.toThrow();
+  }finally{
+    await admin.query("DELETE FROM forma_saas.app_session WHERE user_id=$1",[linked]);
+    await admin.query("DELETE FROM forma_saas.provider_identity WHERE user_id=$1",[linked]);
+    await admin.query("DELETE FROM forma_saas.app_user WHERE id=$1",[linked]);
+    await writer.close();await rolePool.end();await tenantPool.end();
+  }
+ });
+ it("M30 simultaneous identity issuance and unlink never leaves a valid session",async()=>{
+  const linked="dddddddd-dddd-dddd-dddd-dddddddddddd";
+  const issuer="https://login.example.test/tenant",clientId="forma-oidc",subject="concurrent-link-subject";
+  const writer=createPgIdentitySessionWriter({
+    connectionString:"postgresql://forma_identity_test:identity-test-only@127.0.0.1:5432/forma_saas_runtime_test",
+    maxConnections:2
+  });
+  const unlinkPool=new Pool({
+    connectionString:"postgresql://forma_identity_admin_test:identity-admin-test-only@127.0.0.1:5432/forma_saas_runtime_test",max:1
+  });
+  try{
+    await admin.query("INSERT INTO forma_saas.app_user(id,email_normalized) VALUES($1,$2)",[linked,"race@example.test"]);
+    await admin.query("INSERT INTO forma_saas.provider_identity(issuer,client_id,subject,user_id) VALUES($1,$2,$3,$4)",
+      [issuer,clientId,subject,linked]);
+    const attempts=Array.from({length:8},()=>createSessionCredential().tokenHash);
+    // Whether issuance or unlink obtains the account lock first, the end state
+    // MUST contain zero active sessions. An issue after unlink must fail.
+    const settled=await Promise.allSettled([
+      ...attempts.map(async tokenHash=>writer.issueProviderSession({
+        issuer,clientId,subject,tokenHash,createdAt:new Date(),expiresAt:new Date(Date.now()+60000)
+      })),
+      unlinkPool.query("SELECT forma_saas.identity_unlink_provider($1,$2,$3)",[issuer,clientId,subject])
+    ]);
+    expect(settled.at(-1)?.status).toBe("fulfilled");
+    const result=await admin.query(
+      "SELECT count(*)::int AS active FROM forma_saas.app_session WHERE user_id=$1 AND revoked_at IS NULL",[linked]);
+    expect(result.rows[0].active).toBe(0);
+    const link=await admin.query("SELECT status FROM forma_saas.provider_identity WHERE issuer=$1 AND client_id=$2 AND subject=$3",
+      [issuer,clientId,subject]);
+    expect(link.rows[0].status).toBe("REVOKED");
+    await expect(writer.issueProviderSession({
+      issuer,clientId,subject,tokenHash:createSessionCredential().tokenHash,
+      createdAt:new Date(),expiresAt:new Date(Date.now()+60000)
+    })).rejects.toThrow();
+  }finally{
+    await admin.query("DELETE FROM forma_saas.app_session WHERE user_id=$1",[linked]);
+    await admin.query("DELETE FROM forma_saas.provider_identity WHERE user_id=$1",[linked]);
+    await admin.query("DELETE FROM forma_saas.app_user WHERE id=$1",[linked]);
+    await writer.close();await unlinkPool.end();
   }
  });
  it("rejects a pool carrying non-local session context",async()=>{
