@@ -1,3 +1,4 @@
+import { hashSessionToken, resolveDatabaseSession, type SessionTokenReader } from "./session";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient, type Prisma } from "../generated/client";
 import { authorizeTenantScope, TenantAccessDenied, type ScopeSelection,
@@ -19,9 +20,12 @@ export function validateConnectionUrl(value: string | undefined): string {
  * must enforce returned branch scope, and must use/await only the supplied tx.
  */
 export function createTenantRuntime(options: {
-  connectionString: string; resolveSession: SessionResolver; poolSize?: number;
-}) {
+  connectionString: string; poolSize?: number;
+} & ({ readSessionToken: SessionTokenReader; resolveSession?: never }
+  | { resolveSession: SessionResolver; readSessionToken?: never })) {
   if ("window" in globalThis) throw new Error("SERVER_ONLY_RUNTIME");
+  if ((typeof options.readSessionToken === "function") === (typeof options.resolveSession === "function"))
+    throw new Error("EXACTLY_ONE_SESSION_SOURCE_REQUIRED");
   const max = options.poolSize ?? 4;
   if (!Number.isInteger(max) || max < 1 || max > 20) throw new Error("INVALID_POOL_SIZE");
   const client = new PrismaClient({ adapter: new PrismaPg({
@@ -30,8 +34,11 @@ export function createTenantRuntime(options: {
   }) });
   async function withTenant<T>(selection: ScopeSelection,
     work: (tx: Prisma.TransactionClient, scope: AuthorizedTenantScope) => Promise<T>): Promise<T> {
-    const actor = await options.resolveSession();
-    if (!actor || !uuid.test(actor.userId)) throw new TenantAccessDenied("UNAUTHENTICATED");
+    const tokenHash = options.readSessionToken
+      ? hashSessionToken(await options.readSessionToken()) : null;
+    const externalActor = options.resolveSession ? await options.resolveSession() : null;
+    if (options.readSessionToken ? !tokenHash : !externalActor || !uuid.test(externalActor.userId))
+      throw new TenantAccessDenied("UNAUTHENTICATED");
     if (![selection.tenantId, selection.branchId, selection.registerId]
       .filter(value => value !== undefined).every(value => uuid.test(value!)))
       throw new TenantAccessDenied("FORBIDDEN");
@@ -42,9 +49,12 @@ export function createTenantRuntime(options: {
           WHERE n.nspname='forma_saas' AND pg_has_role(current_user,c.relowner,'USAGE')
         )) AS unsafe FROM pg_roles r WHERE r.rolname=current_user`;
       if (!role || role.unsafe) throw new Error("UNSAFE_SAAS_DATABASE_ROLE");
-      const [previous] = await tx.$queryRaw<{ tenant: string | null }[]>`
-        SELECT nullif(current_setting('app.tenant_id', true), '') AS tenant`;
-      if (previous?.tenant) throw new Error("DIRTY_TENANT_CONNECTION");
+      const [previous] = await tx.$queryRaw<{ tenant: string | null; session: string | null }[]>`
+        SELECT nullif(current_setting('app.tenant_id', true), '') AS tenant,
+          nullif(current_setting('app.session_hash', true), '') AS session`;
+      if (previous?.tenant || previous?.session) throw new Error("DIRTY_TENANT_CONNECTION");
+      const actor = tokenHash ? await resolveDatabaseSession(tx, tokenHash) : externalActor;
+      if (!actor || !uuid.test(actor.userId)) throw new TenantAccessDenied("UNAUTHENTICATED");
       // Bootstrap membership lookup only. Setting context is NOT authorization.
       // Business callback cannot run until live membership/assignment validation.
       await tx.$queryRaw`SELECT set_config('app.tenant_id', ${selection.tenantId}, true)`;

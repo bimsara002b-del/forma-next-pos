@@ -2,6 +2,7 @@ import { beforeAll, afterAll, describe, expect, it } from "vitest";
 import { Pool } from "pg";
 import { readFile } from "node:fs/promises";
 import { createTenantRuntime } from "../src/runtime";
+import { createSessionCredential } from "../src/session";
 const adminUrl=process.env.SAAS_TEST_ADMIN_URL, appUrl=process.env.SAAS_TEST_APP_URL;
 const A="11111111-1111-1111-1111-111111111111", B="22222222-2222-2222-2222-222222222222";
 const user="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", stranger="bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
@@ -11,6 +12,9 @@ const memberA="aaaaaaaa-3333-3333-3333-333333333333", memberB="bbbbbbbb-3333-333
 const productB="bbbbbbbb-4444-4444-4444-444444444444";
 let admin:Pool, runtime:ReturnType<typeof createTenantRuntime>;
 let actor:{userId:string}|null={userId:user};
+const credential = createSessionCredential(), otherCredential = createSessionCredential();
+let presentedToken: string | undefined = credential.token;
+let sessions: ReturnType<typeof createTenantRuntime>;
 function testUrl(value:string|undefined) {
  if(!value) throw new Error("Both test URLs required");
  const u=new URL(value);
@@ -24,13 +28,14 @@ describe.skipIf(!adminUrl&&!appUrl)("Prisma 7 restricted-role tenant transaction
   admin=new Pool({connectionString:testUrl(adminUrl),max:1});testUrl(appUrl);
   if((await admin.query("SELECT to_regnamespace('forma_saas') AS schema")).rows[0].schema)
    throw new Error("Requires empty database; refusing to modify existing schema");
-  for(const file of ["20261023_000001_tenant_foundation","20261024_000002_member_assignments"])
+  for(const file of ["20261023_000001_tenant_foundation","20261024_000002_member_assignments","20261024_000003_revocable_sessions"])
    await admin.query(await readFile(new URL(`../../../prisma/saas/migrations/${file}/migration.sql`,import.meta.url),"utf8"));
   await admin.query(`
    CREATE ROLE forma_runtime_test LOGIN PASSWORD 'runtime-test-only' NOSUPERUSER NOBYPASSRLS;
    GRANT USAGE ON SCHEMA forma_saas TO forma_runtime_test;
    GRANT SELECT ON forma_saas.tenant_membership,forma_saas.member_branch,forma_saas.member_register,
-    forma_saas.branch,forma_saas.register,forma_saas.product TO forma_runtime_test;
+    forma_saas.branch,forma_saas.register,forma_saas.product,
+    forma_saas.app_session,forma_saas.app_user TO forma_runtime_test;
    GRANT INSERT ON forma_saas.product TO forma_runtime_test;
    INSERT INTO forma_saas.app_user(id,email_normalized) VALUES ('${user}','user@example.test');
    INSERT INTO forma_saas.tenant(id,slug,legal_name) VALUES ('${A}','a','A'),('${B}','b','B');
@@ -43,9 +48,13 @@ describe.skipIf(!adminUrl&&!appUrl)("Prisma 7 restricted-role tenant transaction
    INSERT INTO forma_saas.product(tenant_id,sku,name,price_minor) VALUES ('${A}','A','Product A',500);
    INSERT INTO forma_saas.product(id,tenant_id,sku,name,price_minor) VALUES ('${productB}','${B}','B','Product B',700);
   `);
+  await admin.query("INSERT INTO forma_saas.app_user(id,email_normalized) VALUES ($1,'stranger@example.test')",[stranger]);
+  for (const [hash, id] of [[credential.tokenHash,user],[otherCredential.tokenHash,stranger]])
+   await admin.query("INSERT INTO forma_saas.app_session(token_hash,user_id,expires_at) VALUES ($1,$2,now()+interval '1 hour')",[hash,id]);
+  sessions=createTenantRuntime({connectionString:appUrl!,readSessionToken:async()=>presentedToken,poolSize:1});
   runtime=createTenantRuntime({connectionString:appUrl!,resolveSession:async()=>actor,poolSize:1});
  });
- afterAll(async()=>{await runtime?.close();await admin?.end();});
+ afterAll(async()=>{await runtime?.close();await sessions?.close();await admin?.end();});
  it("isolates twenty alternating tenant requests reusing one pooled connection",async()=>{
   const results=await Promise.all(Array.from({length:20},(_,i)=>runtime.listProducts(i%2?B:A)));
   results.forEach((rows,i)=>expect(rows.map(p=>p.sku)).toEqual([i%2?"B":"A"]));
@@ -94,4 +103,80 @@ describe.skipIf(!adminUrl&&!appUrl)("Prisma 7 restricted-role tenant transaction
  it("DB rejects cross-tenant assignment even for migrator",async()=>{
   await expect(admin.query("INSERT INTO forma_saas.member_branch VALUES ($1,$2,$3)",[A,memberA,branchB])).rejects.toThrow();
  });
+ it("authenticates stored opaque sessions before tenant membership lookup",async()=>{
+  expect((await sessions.listProducts(A)).map(p=>p.sku)).toEqual(["A"]);
+  try {
+   presentedToken=otherCredential.token;
+   await expect(sessions.listProducts(A)).rejects.toMatchObject({reason:"FORBIDDEN"});
+  } finally {presentedToken=credential.token;}
+ });
+ it("rejects missing, malformed, forged and stored-hash-as-token credentials",async()=>{
+  try {
+   for(const token of [undefined,"demo","a".repeat(64),credential.tokenHash]) {
+    presentedToken=token;
+    await expect(sessions.listProducts(A)).rejects.toMatchObject({reason:"UNAUTHENTICATED"});
+   }
+  } finally {presentedToken=credential.token;}
+ });
+ it("rechecks revocation on the next request using the same pool",async()=>{
+  await sessions.listProducts(A);
+  await admin.query("UPDATE forma_saas.app_session SET revoked_at=now() WHERE token_hash=$1",[credential.tokenHash]);
+  try {await expect(sessions.listProducts(A)).rejects.toMatchObject({reason:"UNAUTHENTICATED"});}
+  finally {await admin.query("UPDATE forma_saas.app_session SET revoked_at=NULL WHERE token_hash=$1",[credential.tokenHash]);}
+ });
+ it("rejects expired sessions using database time",async()=>{
+  await admin.query("UPDATE forma_saas.app_session SET created_at=now()-interval '2 hours',expires_at=now()-interval '1 hour' WHERE token_hash=$1",[credential.tokenHash]);
+  try {await expect(sessions.listProducts(A)).rejects.toMatchObject({reason:"UNAUTHENTICATED"});}
+  finally {await admin.query("UPDATE forma_saas.app_session SET created_at=now(),expires_at=now()+interval '1 hour' WHERE token_hash=$1",[credential.tokenHash]);}
+ });
+ it("rejects disabled account before any business callback",async()=>{
+  await admin.query("UPDATE forma_saas.app_user SET status='DISABLED' WHERE id=$1",[user]);
+  let called=false;
+  try {
+   await expect(sessions.withTenant({tenantId:A,capability:"products.read"},async()=>{called=true;}))
+    .rejects.toMatchObject({reason:"UNAUTHENTICATED"});
+   expect(called).toBe(false);
+  } finally {await admin.query("UPDATE forma_saas.app_user SET status='ACTIVE' WHERE id=$1",[user]);}
+ });
+ it("limits identity reads to the presented session and denies session minting",async()=>{
+  const rows=await sessions.withTenant({tenantId:A,capability:"products.read"},async tx=>({
+   sessions: await tx.appSession.findMany(), users: await tx.appUser.findMany()
+  }));
+  expect(rows.sessions.map(s=>s.tokenHash)).toEqual([credential.tokenHash]);
+  expect(rows.users.map(u=>u.id)).toEqual([user]);
+  await expect(sessions.withTenant({tenantId:A,capability:"products.read"},tx=>
+   tx.appSession.create({data:{tokenHash:createSessionCredential().tokenHash,userId:user,expiresAt:new Date(Date.now()+60000)}})))
+   .rejects.toThrow();
+  // A fresh raw pooled connection without session context sees no identity rows.
+  const raw=new Pool({connectionString:appUrl,max:1});
+  try {
+   expect((await raw.query("SELECT * FROM forma_saas.app_session")).rows).toEqual([]);
+   expect((await raw.query("SELECT * FROM forma_saas.app_user")).rows).toEqual([]);
+  } finally {await raw.end();}
+ });
+ it("clears session context after rollback and alternates authenticated actors",async()=>{
+  await expect(sessions.withTenant({tenantId:A,capability:"products.read"},async()=>{throw new Error("session_rollback");}))
+   .rejects.toThrow("session_rollback");
+  for(let i=0;i<6;i++) {
+   presentedToken=otherCredential.token;
+   await expect(sessions.listProducts(A)).rejects.toMatchObject({reason:"FORBIDDEN"});
+   presentedToken=credential.token;
+   expect((await sessions.listProducts(B)).map(p=>p.sku)).toEqual(["B"]);
+  }
+ });
+ it("rejects excessive session lifetime at the database boundary",async()=>{
+  await expect(admin.query("INSERT INTO forma_saas.app_session(token_hash,user_id,expires_at) VALUES ($1,$2,now()+interval '9 hours')",[createSessionCredential().tokenHash,user]))
+   .rejects.toThrow();
+ });
+
+ it("rejects a pool carrying non-local session context",async()=>{
+  const dirty=createTenantRuntime({connectionString:appUrl!,readSessionToken:async()=>credential.token,poolSize:1});
+  try {
+   await dirty.withTenant({tenantId:A,capability:"products.read"},async tx=>{
+    await tx.$queryRaw`SELECT set_config('app.session_hash', ${credential.tokenHash}, false)`;
+   });
+   await expect(dirty.listProducts(A)).rejects.toThrow("DIRTY_TENANT_CONNECTION");
+  } finally {await dirty.close();}
+ });
+
 });
