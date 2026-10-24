@@ -22,10 +22,12 @@ export type Membership = {
   assignedBranchIds: readonly string[];
   assignedRegisterIds: readonly string[];
 };
+type ScopedTenant = { id: string; status: string };
 type ScopedBranch = { id: string; tenantId: string; isActive: boolean };
 type ScopedRegister = { id: string; tenantId: string; branchId: string; isActive: boolean };
 export type TenantScopeStore = {
   findMembership(userId: string, tenantId: string): Promise<Membership | null>;
+  findTenant(tenantId: string): Promise<ScopedTenant | null>;
   findBranch(branchId: string): Promise<ScopedBranch | null>;
   findRegister(registerId: string): Promise<ScopedRegister | null>;
 };
@@ -65,6 +67,13 @@ const policy: Readonly<Record<TenantRole, readonly TenantCapability[]>> = {
   CASHIER: ["products.read", "checkout.create", "sales.read"],
   INVENTORY_CLERK: ["products.read", "products.write", "inventory.read", "inventory.adjust"]
 };
+// A paused tenant retains only explicitly permissioned, non-mutating access.
+// Billing's grace deadlines and feature entitlements remain separate P0 gates.
+const writableTenantStatuses = new Set(["TRIALING", "ACTIVE", "PAST_DUE", "GRACE"]);
+const readOnlyTenantStatuses = new Set(["SUSPENDED", "CANCELLED"]);
+const readOnlyCapabilities = new Set<TenantCapability>([
+  "branches.read", "products.read", "inventory.read", "sales.read", "reports.read"
+]);
 const branchMandatory = new Set<TenantCapability>(["inventory.adjust", "checkout.create", "sales.refund.approve"]);
 // Non-owner reads must not turn missing branch selection into tenant-wide access.
 const branchScopedReads = new Set<TenantCapability>(["branches.read", "inventory.read", "sales.read", "reports.read"]);
@@ -97,6 +106,13 @@ export async function authorizeTenantScope(
       membership.tenantId !== selection.tenantId ||
       membership.status !== "ACTIVE" || !isTenantRole(membership.role)) forbidden();
   if (!policy[membership.role].includes(selection.capability)) forbidden();
+  // Tenant state comes from the same trusted transaction as membership. Never
+  // accept a request-side state or silently allow an unknown/future state.
+  const tenant = await store.findTenant(selection.tenantId);
+  if (!tenant || tenant.id !== selection.tenantId ||
+      (!writableTenantStatuses.has(tenant.status) &&
+       !(readOnlyTenantStatuses.has(tenant.status) &&
+         readOnlyCapabilities.has(selection.capability)))) forbidden();
   if (branchMandatory.has(selection.capability) && !selection.branchId) forbidden();
   if (membership.role !== "OWNER" && branchScopedReads.has(selection.capability) && !selection.branchId) forbidden();
   if (selection.registerId && !selection.branchId) forbidden();
