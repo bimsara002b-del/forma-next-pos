@@ -190,7 +190,7 @@ describe.skipIf(!adminUrl&&!appUrl)("Prisma 7 restricted-role tenant transaction
    const created=await issueVerifiedSession(writer,{userId:user,verifiedAt:new Date(),authenticationMethod:"passkey"});
    const hash=createSessionCredential();
    expect(created.token).toMatch(/^[0-9a-f]{64}$/);
-   const sessionsForUser=await admin.query("SELECT token_hash FROM forma_saas.app_session WHERE user_id=$1 AND token_hash=$2",[user,requireHash(created.token)]);
+   const sessionsForUser=await admin.query("SELECT token_hash FROM forma_saas.app_session WHERE user_id=$1 AND token_hash=$2",[user,hashSessionToken(created.token)]);
    expect(sessionsForUser.rowCount).toBe(1);
    await writer.create({userId:user,tokenHash:issued.tokenHash,createdAt:new Date(),expiresAt:new Date(Date.now()+60000)});
    expect(await writer.revokeHash({tokenHash:issued.tokenHash,revokedAt:new Date()})).toBe(1);
